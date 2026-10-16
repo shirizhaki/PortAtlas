@@ -4,6 +4,14 @@ A native macOS app that maps the devices connected to your Mac: USB, Thunderbolt
 
 **Early 0.1.0 preview · Apple Silicon · macOS 14 or newer.** PortAtlas reads local hardware information. It has no network services or analytics. Hardware and macOS versions expose different amounts of information; missing or ambiguous readings stay unavailable.
 
+**Physical view** — connections grouped by the Mac's physical sockets, with downstream devices, display routing, and available power readings.
+
+![PortAtlas physical view showing connected storage, a Thunderbolt dock, a display, and an iPhone](Docs/Images/physical-map.png)
+
+**Logical view** — the reported device hierarchy, including USB branches and downstream hubs.
+
+![PortAtlas logical view showing the reported USB and Thunderbolt device hierarchy](Docs/Images/logical-map.png)
+
 ## The map
 
 - **Physical view** groups connections by the Mac's physical sockets, with downstream accessories and optional dock-component overrides.

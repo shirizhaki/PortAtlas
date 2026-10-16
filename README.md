@@ -105,6 +105,11 @@ Scripts/                     Local build, tests, source packaging
 PortAtlas.xcodeproj/          Native app target using local package libraries
 ```
 
+## Contributors
+
+- [@shirizhaki](https://github.com/shirizhaki) — Project creator, product direction, design, and hardware testing.
+- [OpenAI Codex](https://openai.com/codex/) — AI-assisted implementation, debugging, testing, and release preparation.
+
 ## License and acknowledgements
 
 PortAtlas is available under the [MIT License](LICENSE), copyright 2026 PortAtlas contributors. Preserve its copyright and permission notice when redistributing copies or substantial portions.

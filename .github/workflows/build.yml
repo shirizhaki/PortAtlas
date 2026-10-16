@@ -1,0 +1,17 @@
+name: Build and test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check build toolchain
+        run: ./Scripts/check-toolchain.sh
+      - name: Build Swift package
+        run: swift build
+      - name: Test core
+        run: ./Scripts/test.sh
+      - name: Build native app
+        run: xcodebuild -project PortAtlas.xcodeproj -scheme 'PortAtlas' -configuration Debug CODE_SIGNING_ALLOWED=NO build

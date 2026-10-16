@@ -1,0 +1,37 @@
+.DS_Store
+.build/
+.swiftpm/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.app
+*.dmg
+*.zip
+*.log
+*.xcarchive
+LocalCaptures/
+
+# Personal calibration/settings remain in Application Support. Ignore accidental copies too.
+ports.json
+presentation.json
+LocalSettings/
+*.ioreg
+*.spx
+*.dSYM/
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+*.pem
+*.mobileprovision
+*.provisionprofile
+# Local editor/agent state and ad-hoc hardware captures are never source.
+.codex/
+.agents/
+.idea/
+.vscode/
+*ioreg*.plist
+*system-profiler*.json

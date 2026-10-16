@@ -1,0 +1,60 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+        E11111111111111111111111 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppAppearance.swift"; sourceTree = "<group>"; };
+        F11111111111111111111111 = { isa = PBXBuildFile; fileRef = E11111111111111111111111; };
+        E22222222222222222222222 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PortMatchingView.swift"; sourceTree = "<group>"; };
+        F22222222222222222222222 = { isa = PBXBuildFile; fileRef = E22222222222222222222222; };
+        E33333333333333333333333 = { isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+        F33333333333333333333333 = { isa = PBXBuildFile; fileRef = E33333333333333333333333; };
+
+        D11111111111111111111111 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MapStyle.swift"; sourceTree = "<group>"; };
+        D22222222222222222222222 = { isa = PBXBuildFile; fileRef = D11111111111111111111111; };
+        C11111111111111111111111 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MapViewport.swift"; sourceTree = "<group>"; };
+        C22222222222222222222222 = { isa = PBXBuildFile; fileRef = C11111111111111111111111; };
+        B11111111111111111111111 = { isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices/WhatPort-LICENSE.txt; sourceTree = "<group>"; };
+        B22222222222222222222222 = { isa = PBXBuildFile; fileRef = B11111111111111111111111; };
+        A33333333333333333333333 = { isa = PBXFileReference; lastKnownFileType = image.icns; path = Packaging/AppIcon.icns; sourceTree = "<group>"; };
+        A44444444444444444444444 = { isa = PBXBuildFile; fileRef = A33333333333333333333333; };
+        A11111111111111111111111 = { isa = PBXFileReference; lastKnownFileType = text.xml; path = Packaging/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+        A22222222222222222222222 = { isa = PBXBuildFile; fileRef = A11111111111111111111111; };
+		05DF41F75FA1D43C0E6BAE6E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PhysicalMapView.swift"; sourceTree = "<group>"; };
+		05D2047C936B4F954E5901BB = { isa = PBXBuildFile; fileRef = 05DF41F75FA1D43C0E6BAE6E; };
+		D57CFC68EB18B2E04841C1B1 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeviceDetailView.swift"; sourceTree = "<group>"; };
+		2450949CBC60EC4940BE14AC = { isa = PBXBuildFile; fileRef = D57CFC68EB18B2E04841C1B1; };
+		11600690A356F76DEA679724 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AtlasStore.swift"; sourceTree = "<group>"; };
+		DE4C226B9B38CB1437B0D403 = { isa = PBXBuildFile; fileRef = 11600690A356F76DEA679724; };
+		6A011EB1F1DB16DAF23F14A2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AtlasView.swift"; sourceTree = "<group>"; };
+		A3B3ECC5A437B3B24231EE87 = { isa = PBXBuildFile; fileRef = 6A011EB1F1DB16DAF23F14A2; };
+		11A8671651FBB49DFD01BB5B = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PortSettingsView.swift"; sourceTree = "<group>"; };
+		C13179336736D9DB7E16D907 = { isa = PBXBuildFile; fileRef = 11A8671651FBB49DFD01BB5B; };
+		E4247FA2606E89D95DEF1313 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TopologyCanvas.swift"; sourceTree = "<group>"; };
+		C0E893E17A65ABD33987BA08 = { isa = PBXBuildFile; fileRef = E4247FA2606E89D95DEF1313; };
+		D7634A514A8A83872665C64F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PortAtlasApp.swift"; sourceTree = "<group>"; };
+		23629721F0282317806EF315 = { isa = PBXBuildFile; fileRef = D7634A514A8A83872665C64F; };
+		38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PortAtlas.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A2A88DEEFF3D1D23E496597 = { isa = PBXGroup; children = (E11111111111111111111111, E22222222222222222222222, D11111111111111111111111, C11111111111111111111111, 05DF41F75FA1D43C0E6BAE6E, D57CFC68EB18B2E04841C1B1, 11600690A356F76DEA679724, 6A011EB1F1DB16DAF23F14A2, 11A8671651FBB49DFD01BB5B, E4247FA2606E89D95DEF1313, D7634A514A8A83872665C64F); path = Sources/PortAtlasApp; sourceTree = "<group>"; };
+		FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (38A007151ABE87CC01A5B6E9); name = Products; sourceTree = "<group>"; };
+		325F10A6957A34D66CB8C0E4 = { isa = PBXGroup; children = (E33333333333333333333333, B11111111111111111111111, A33333333333333333333333, A11111111111111111111111, 3A2A88DEEFF3D1D23E496597, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+		582681C2EAE02B3F3D399C0C = { isa = XCLocalSwiftPackageReference; relativePath = .; };
+		36CAA9AD018228BBA2C1CEE2 = { isa = XCSwiftPackageProductDependency; productName = PortAtlasCore; package = 582681C2EAE02B3F3D399C0C; };
+		68CA022048E7290E7E8E2485 = { isa = PBXBuildFile; productRef = 36CAA9AD018228BBA2C1CEE2; };
+		5285863AC856127A3A5C8BC5 = { isa = XCSwiftPackageProductDependency; productName = PortAtlasHardware; package = 582681C2EAE02B3F3D399C0C; };
+		6A3428BB11389F9A4D4E5BA2 = { isa = PBXBuildFile; productRef = 5285863AC856127A3A5C8BC5; };
+		BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (F11111111111111111111111, F22222222222222222222222, D22222222222222222222222, C22222222222222222222222, 05D2047C936B4F954E5901BB, 2450949CBC60EC4940BE14AC, DE4C226B9B38CB1437B0D403, A3B3ECC5A437B3B24231EE87, C13179336736D9DB7E16D907, C0E893E17A65ABD33987BA08, 23629721F0282317806EF315); runOnlyForDeploymentPostprocessing = 0; };
+		7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (68CA022048E7290E7E8E2485, 6A3428BB11389F9A4D4E5BA2); runOnlyForDeploymentPostprocessing = 0; };
+		0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (F33333333333333333333333, B22222222222222222222222, A22222222222222222222222, A44444444444444444444444); runOnlyForDeploymentPostprocessing = 0; };
+		0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = 976B52545947CA66FD9EF2A4; buildPhases = (BCE16DD0260827ECF338C787, 7561BFB015D8F536760CB671, 0189424A5A60FED329FA868E); buildRules = (); dependencies = (); name = "PortAtlas"; packageProductDependencies = (36CAA9AD018228BBA2C1CEE2, 5285863AC856127A3A5C8BC5); productName = "PortAtlas"; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; };
+		98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 640DC9EFD529235A8D9E2727; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 325F10A6957A34D66CB8C0E4; packageReferences = (582681C2EAE02B3F3D399C0C); productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); };
+		ED8772ADEC3A6C25161BC957 = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = "14.0"; SDKROOT = "macosx"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG"; }; name = Debug; };
+		00F209874A1F7309F6DCEAA7 = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = "14.0"; SDKROOT = "macosx"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; }; name = Release; };
+		640DC9EFD529235A8D9E2727 = { isa = XCConfigurationList; buildConfigurations = (ED8772ADEC3A6C25161BC957, 00F209874A1F7309F6DCEAA7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		4D8F54E7CBAF670D9F6C230D = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = "14.0"; SDKROOT = "macosx"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; PRODUCT_NAME = "PortAtlas"; EXECUTABLE_NAME = "PortAtlas"; PRODUCT_BUNDLE_IDENTIFIER = "org.portatlas.app"; INFOPLIST_FILE = "Packaging/Info.plist"; CODE_SIGNING_ALLOWED = "NO"; ENABLE_APP_SANDBOX = "NO"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG"; }; name = Debug; };
+		1A6EFC2CD0AF63DD14BE0438 = { isa = XCBuildConfiguration; buildSettings = { MACOSX_DEPLOYMENT_TARGET = "14.0"; SDKROOT = "macosx"; SWIFT_VERSION = "5.0"; CLANG_ENABLE_MODULES = "YES"; PRODUCT_NAME = "PortAtlas"; EXECUTABLE_NAME = "PortAtlas"; PRODUCT_BUNDLE_IDENTIFIER = "org.portatlas.app"; INFOPLIST_FILE = "Packaging/Info.plist"; CODE_SIGNING_ALLOWED = "NO"; ENABLE_APP_SANDBOX = "NO"; SWIFT_OPTIMIZATION_LEVEL = "-O"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; }; name = Release; };
+		976B52545947CA66FD9EF2A4 = { isa = XCConfigurationList; buildConfigurations = (4D8F54E7CBAF670D9F6C230D, 1A6EFC2CD0AF63DD14BE0438); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0;
+}

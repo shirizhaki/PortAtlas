@@ -54,7 +54,7 @@ private struct MapPinch {
     var anchor: UnitPoint = .center
 }
 
-/// Both maps share interaction; card text remains native and vectors redraw at each zoom.
+/// Both maps share interaction. Content is zoomed as a transform; SwiftUI redraws text and vectors at the zoomed size.
 struct MapViewport<Content: View>: View {
     @EnvironmentObject private var store: AtlasStore
     let kind: AtlasMapKind
@@ -117,8 +117,11 @@ struct MapViewport<Content: View>: View {
                 height: relative.height - (relative.height - state.pan.height) * ratio + drag.height)
             ZStack {
                 MapContentBackground()
-                content().environment(\.mapScale, scale)
+                // Laid out once at 100% and zoomed as a transform, so cards keep their shape
+                // while zooming instead of re-flowing at every step.
+                content().environment(\.mapScale, 1)
                     .background(GeometryReader { proxy in Color.clear.preference(key: ContentSize.self, value: MeasuredMapSize(size: proxy.size, ready: store.snapshot.modelIdentifier != "Unknown Mac")) })
+                    .scaleEffect(scale)
                     .offset(bounded(previewPan, viewport: viewport, at: scale))
             }
             .frame(width: viewport.width, height: viewport.height).clipped().contentShape(Rectangle())
@@ -138,7 +141,7 @@ struct MapViewport<Content: View>: View {
             .onPreferenceChange(ContentSize.self) { measured in
                 let size = measured.size
                 guard size.width > 0, size.height > 0 else { return }
-                let natural = CGSize(width: size.width / scale, height: size.height / scale)
+                let natural = size
                 if abs(natural.width - naturalSize.width) > 0.5 || abs(natural.height - naturalSize.height) > 0.5 { naturalSize = natural }
                 // Attach/detach and telemetry do not reset a user's view.
                 if measured.ready && (!state.initialized || (refitOnMeasure && state.fitMode)) { fit(viewport, content: natural) }
@@ -168,8 +171,9 @@ struct MapViewport<Content: View>: View {
             .overlayPreferenceValue(WireInteractionAreas.self) { areas in
                 GeometryReader { proxy in
                     Color.clear.allowsHitTesting(false).preference(key: MapTapExclusionPreference.self, value: MapTapExclusions(wires: areas.map { area in
+                        // Paths are in unscaled map coordinates; the anchor origin is already zoomed.
                         let origin = proxy[area.bounds].origin
-                        return area.path.applying(CGAffineTransform(translationX: origin.x, y: origin.y))
+                        return area.path.applying(CGAffineTransform(scaleX: scale, y: scale).concatenating(CGAffineTransform(translationX: origin.x, y: origin.y)))
                     }))
                 }
             }

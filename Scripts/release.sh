@@ -40,5 +40,6 @@ xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 
-shasum -a 256 "$dmg" > "$dmg.sha256"
+# The checksum names only the file, so `shasum -c` works next to a downloaded copy.
+(cd "$(dirname "$dmg")" && shasum -a 256 "$(basename "$dmg")" > "$(basename "$dmg").sha256")
 printf 'Notarized %s\n' "$dmg"

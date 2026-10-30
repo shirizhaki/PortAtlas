@@ -27,9 +27,13 @@ struct PortAtlasApp: App {
             }
             CommandGroup(after: .toolbar) {
                 Divider()
+                Button("Physical Map") { store.activeMapKind = .physical }.keyboardShortcut("1")
+                Button("Logical Map") { store.activeMapKind = .logical }.keyboardShortcut("2")
+                Divider()
+                Button("Zoom In") { store.requestZoom(1) }.keyboardShortcut("=")
+                Button("Zoom Out") { store.requestZoom(-1) }.keyboardShortcut("-")
                 Button("Fit All") { store.fitRevision += 1 }.keyboardShortcut("0")
-                Button("Focus Selection") { store.focusRevision += 1 }.keyboardShortcut("2").disabled(store.selection == nil)
-                Button("Switch Map View") { store.activeMapKind = store.activeMapKind == .physical ? .logical : .physical }.keyboardShortcut("1")
+                Button("Focus Selection") { store.focusRevision += 1 }.keyboardShortcut("l").disabled(store.selection == nil)
             }
         }
         Settings {

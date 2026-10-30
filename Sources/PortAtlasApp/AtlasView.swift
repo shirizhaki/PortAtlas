@@ -6,16 +6,25 @@ typealias ViewState<Value> = SwiftUI.State<Value>
 struct AtlasView: View {
     @EnvironmentObject private var store: AtlasStore
     @ViewState private var showingPortMatcher = false
+    /// Unplaced connections the user already dismissed; a new one brings the banner back.
+    @ViewState private var dismissedPlacementKeys: Set<String> = []
     private var logical: Bool { store.activeMapKind == .logical }
+    private var placementKeys: Set<String> {
+        let topology = store.physicalTopology
+        return Set(topology.unplaced.map(\.id)).union(topology.sockets.isEmpty ? ["no-sockets"] : [])
+    }
     var body: some View {
         VStack(spacing: 0) {
             if let error = store.discoveryError { banner(error + " Showing the last successful snapshot.") }
             if let error = store.monitoringError { banner(error) }
-            if !logical && (store.physicalTopology.sockets.isEmpty || !store.physicalTopology.unplaced.isEmpty) {
+            if !logical, case let keys = placementKeys, !keys.isEmpty, !keys.isSubset(of: dismissedPlacementKeys) {
                 HStack {
                     Label("Some connections need a physical position.", systemImage: "cable.connector").font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button("Match ports", systemImage: "slider.horizontal.3") { showingPortMatcher = true }
+                    Button { dismissedPlacementKeys.formUnion(keys) } label: { Image(systemName: "xmark").frame(width: 20, height: 20) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .help("Dismiss until another connection needs a position").accessibilityLabel("Dismiss")
                 }.padding(.horizontal, 20).padding(.vertical, 10)
             }
             Divider()
@@ -24,7 +33,7 @@ struct AtlasView: View {
                 Group {
                     if logical { TopologyCanvas() } else { PhysicalMapView() }
                 }
-                if store.selection != nil {
+                if store.inspectorVisible {
                     Divider()
                     DeviceDetailView().environmentObject(store)
                 }
@@ -35,7 +44,12 @@ struct AtlasView: View {
         .background(MapWindowReader { store.registerMapWindow($0) })
         .modifier(MapFullScreenToolbar())
         .sheet(isPresented: $showingPortMatcher) { PortMatchingView().environmentObject(store) }
-        .onExitCommand { store.selection = nil }
+        // onExitCommand fires only when a focused view receives the key; observing Escape at
+        // the window works wherever focus is. It is consumed only while the inspector is open.
+        .background(EscapeKeyReader {
+            guard store.inspectorVisible else { return false }
+            store.hideInspector(); return true
+        })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { store.updateFullScreenState($0) }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { store.updateFullScreenState($0) }
         .onAppear { store.updateTelemetryVisibility() }
@@ -59,15 +73,16 @@ struct AtlasView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 if let input = store.liveInput {
                     Button { store.selection = .mac } label: {
-                        Label(input.label, systemImage: "bolt.fill").monospacedDigit().foregroundStyle(.green)
+                        // Toolbar buttons default to icon-only; the reading is the point of this item.
+                        Label(input.label, systemImage: "bolt.fill").labelStyle(.titleAndIcon).monospacedDigit().foregroundStyle(MapPowerStyle.incoming)
                     }.help("Current power input to this Mac")
                         .accessibilityLabel("Current power input: " + input.label)
                 }
                 Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .disabled(store.isRefreshing).help("Refresh connections · ⌘R")
-                Button { store.selection = store.selection == nil ? .mac : nil } label: {
+                Button { store.toggleInspector() } label: {
                     Label("Inspector", systemImage: "sidebar.right")
-                }.help(store.selection == nil ? "Show inspector" : "Hide inspector · Escape")
+                }.help(store.inspectorVisible ? "Hide inspector · Escape" : "Show inspector")
                 Button { store.toggleMapFullScreen() } label: {
                     Label(store.mapIsFullScreen ? "Exit Full Screen" : "Enter Full Screen", systemImage: store.mapIsFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                 }.keyboardShortcut("f", modifiers: [.control, .command])
@@ -105,6 +120,32 @@ private struct MapWindowReader: NSViewRepresentable {
             guard let window else { return }
             DispatchQueue.main.async { [weak self, weak window] in
                 if let window { self?.onWindow(window) }
+            }
+        }
+    }
+}
+
+/// Escape for this window only; sheets and other windows keep their own handling.
+private struct EscapeKeyReader: NSViewRepresentable {
+    var handle: () -> Bool
+    func makeNSView(context: Context) -> MonitorView { MonitorView(handle: handle) }
+    func updateNSView(_ view: MonitorView, context: Context) { view.handle = handle }
+    final class MonitorView: NSView {
+        var handle: () -> Bool
+        private var monitor: Any?
+        init(handle: @escaping () -> Bool) { self.handle = handle; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.keyCode == 53, event.window === self.window,
+                      // Caps Lock (also an input-source switch on many layouts) is not a modifier here.
+                      event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                      self.window?.attachedSheet == nil else { return event }
+                return self.handle() ? nil : event
             }
         }
     }

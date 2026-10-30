@@ -13,6 +13,12 @@ final class AtlasStore: ObservableObject {
     @Published private(set) var displays: [DisplayDevice] = []
     @Published var configuration = PortConfiguration() { didSet { rebuildTopology() } }
     @Published var selection: AtlasSelection? { didSet { rebuildRoute() } }
+    /// An inspector opened from the toolbar stays open, showing this Mac when nothing is selected.
+    /// One opened by selecting an item closes again when the selection clears.
+    @Published private var inspectorPinned = false
+    var inspectorVisible: Bool { inspectorPinned || selection != nil }
+    func toggleInspector() { if inspectorVisible { hideInspector() } else { inspectorPinned = true } }
+    func hideInspector() { inspectorPinned = false; selection = nil }
     /// Derived once per input change. The animated map reads these on every frame.
     private(set) var physicalTopology = PhysicalTopology(snapshot: .empty, configuration: PortConfiguration())
     private(set) var presentation = PhysicalPresentation(snapshot: .empty)
@@ -25,6 +31,9 @@ final class AtlasStore: ObservableObject {
     @Published var logicalViewport = MapViewportState()
     @Published var focusRevision = 0
     @Published var fitRevision = 0
+    /// Menu zoom requests: positive steps zoom in, negative zoom out. The revision makes repeats observable.
+    @Published private(set) var zoomRequest = MapZoomRequest()
+    func requestZoom(_ step: Int) { zoomRequest = MapZoomRequest(revision: zoomRequest.revision + 1, step: step) }
     @Published var animateConnections = true
     @Published var activeMapKind = AtlasMapKind.physical
     @Published private(set) var mapIsFullScreen = false
@@ -299,6 +308,16 @@ final class AtlasStore: ObservableObject {
         guard !settingsNeedReset else { return }
         do { try settingsStore.save(configuration); settingsError = nil }
         catch { settingsError = "Port settings could not be saved: \(error.localizedDescription)" }
+    }
+    /// Replaces the configuration as one undoable step; undoing registers the redo.
+    func applyConfiguration(_ next: PortConfiguration, actionName: String, undoManager: UndoManager?) {
+        guard !settingsNeedReset else { return }
+        let previous = configuration
+        configuration = next; saveSettings()
+        undoManager?.registerUndo(withTarget: self) { store in
+            store.applyConfiguration(previous, actionName: actionName, undoManager: undoManager)
+        }
+        undoManager?.setActionName(actionName)
     }
     func resetSettings() {
         configuration = PortConfiguration(); settingsNeedReset = false; saveSettings()

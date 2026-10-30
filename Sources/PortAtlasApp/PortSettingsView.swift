@@ -6,6 +6,7 @@ struct PortSettingsView: View {
     @AppStorage(AppAppearance.preferenceKey) private var appearance: AppAppearance = .system
     @ViewState private var showingPortMatcher = false
     @ViewState private var confirmReset = false
+    @Environment(\.undoManager) private var undoManager
     private let sides: [PortSide] = [.left, .right, .front, .back]
     private var projection: PhysicalTopology { store.physicalTopology }
     var body: some View {
@@ -109,8 +110,11 @@ struct PortSettingsView: View {
                     .disabled(index == 0).help("Move port earlier")
                 Button { store.configuration.movePort(port.id, by: 1) } label: { Image(systemName: "arrow.down") }
                     .disabled(index == count - 1).help("Move port later")
-                Button { store.configuration.removePort(port.id) } label: { Image(systemName: "trash") }
-                    .foregroundStyle(.secondary).help("Remove port")
+                Button {
+                    var next = store.configuration; next.removePort(port.id)
+                    store.applyConfiguration(next, actionName: "Remove Port", undoManager: undoManager)
+                } label: { Image(systemName: "trash") }
+                    .foregroundStyle(.secondary).help("Remove port · ⌘Z to undo").accessibilityLabel("Remove \(port.name)")
             }.buttonStyle(.borderless)
             HStack {
                 Picker("Side", selection: binding(port.id, \.side, fallback: port.side)) {

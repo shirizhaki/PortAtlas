@@ -45,6 +45,10 @@ struct MapViewportState {
     var initialized = false
 }
 enum AtlasMapKind { case physical, logical }
+struct MapZoomRequest: Equatable {
+    var revision = 0
+    var step = 0
+}
 private struct MapPinch {
     var magnification: CGFloat = 1
     var anchor: UnitPoint = .center
@@ -94,6 +98,16 @@ struct MapViewport<Content: View>: View {
         next.pan = bounded(CGSize(width: next.pan.width + delta.width, height: next.pan.height + delta.height), viewport: viewport, at: next.zoom)
         update(next)
     }
+    private func scroll(_ event: NSEvent, at point: CGPoint, viewport: CGSize) {
+        if event.modifierFlags.contains(.command) {
+            // Command-scroll zooms around the pointer, like most canvas apps.
+            let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 10
+            zoom(state.zoom * exp(delta / 200), around: point, viewport: viewport)
+        } else {
+            let lines: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 12
+            move(CGSize(width: event.scrollingDeltaX * lines, height: event.scrollingDeltaY * lines), viewport: viewport)
+        }
+    }
     var body: some View {
         GeometryReader { geometry in
             let viewport = geometry.size
@@ -108,6 +122,7 @@ struct MapViewport<Content: View>: View {
                     .offset(bounded(previewPan, viewport: viewport, at: scale))
             }
             .frame(width: viewport.width, height: viewport.height).clipped().contentShape(Rectangle())
+            .background(ScrollWheelReader { event, point in scroll(event, at: point, viewport: viewport) })
             .simultaneousGesture(SpatialTapGesture().onEnded { value in
                 if !tapExclusions.contains(value.location) { store.selection = nil }
             })
@@ -130,6 +145,10 @@ struct MapViewport<Content: View>: View {
                 if measured.ready { refitOnMeasure = false }
             }
             .onChange(of: store.fitRevision) { _, _ in if store.activeMapKind == kind { fit(viewport) } }
+            .onChange(of: store.zoomRequest) { _, request in
+                guard store.activeMapKind == kind else { return }
+                zoom(state.zoom * pow(1.2, CGFloat(request.step)), around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport)
+            }
             .onChange(of: viewport) { _, size in if state.fitMode { fit(size) } }
             .overlayPreferenceValue(FocusAnchors.self) { anchors in
                 GeometryReader { proxy in
@@ -156,12 +175,12 @@ struct MapViewport<Content: View>: View {
             }
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: 12) {
-                    Button { zoom(state.zoom / 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "minus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom out").accessibilityLabel("Zoom out").disabled(scale <= range.lowerBound)
+                    Button { zoom(state.zoom / 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "minus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom out · ⌘−").accessibilityLabel("Zoom out").disabled(scale <= range.lowerBound)
                     Text("\(Int(scale * 100))%").monospacedDigit().frame(width: 40)
-                    Button { zoom(state.zoom * 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "plus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom in").accessibilityLabel("Zoom in").disabled(scale >= range.upperBound)
+                    Button { zoom(state.zoom * 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "plus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom in · ⌘=").accessibilityLabel("Zoom in").disabled(scale >= range.upperBound)
                     Divider().frame(height: 16)
                     Button("Fit All") { fit(viewport) }.help("Fit all connections · ⌘0")
-                    Button("Focus Selection") { store.focusRevision += 1 }.disabled(store.selection == nil).help("Center selection · ⌘2")
+                    Button("Focus Selection") { store.focusRevision += 1 }.disabled(store.selection == nil).help("Center selection · ⌘L")
                     if kind == .physical {
                         Divider().frame(height: 16)
                         Toggle(isOn: $store.animateConnections) { Image(systemName: "waveform.path").frame(width: 24, height: 24) }.toggleStyle(.button).accessibilityLabel("Animate connections").help("Animate connections. Motion does not represent measured traffic or power.")
@@ -201,7 +220,35 @@ struct MapViewport<Content: View>: View {
             .onKeyPress(.downArrow) { move(CGSize(width: 0, height: -45), viewport: viewport); return .handled }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(kind == .physical ? "Physical connection map" : "Logical connection map")
-            .accessibilityHint("Drag to move, pinch to zoom. Arrow keys move the map. Fit All shows all connections.")
+            .accessibilityHint("Drag or scroll to move, pinch or Command-scroll to zoom. Arrow keys move the map. Fit All shows all connections.")
+        }
+    }
+}
+
+/// SwiftUI has no scroll-wheel event for plain views on macOS 14. A local monitor
+/// observes scrolls over this view's bounds and leaves clicks to SwiftUI.
+private struct ScrollWheelReader: NSViewRepresentable {
+    var onScroll: (NSEvent, CGPoint) -> Void
+    func makeNSView(context: Context) -> MonitorView { MonitorView(onScroll: onScroll) }
+    func updateNSView(_ view: MonitorView, context: Context) { view.onScroll = onScroll }
+    final class MonitorView: NSView {
+        var onScroll: (NSEvent, CGPoint) -> Void
+        private var monitor: Any?
+        init(onScroll: @escaping (NSEvent, CGPoint) -> Void) { self.onScroll = onScroll; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, let window = self.window, event.window === window else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(point) else { return event }
+                self.onScroll(event, point)
+                return nil
+            }
         }
     }
 }

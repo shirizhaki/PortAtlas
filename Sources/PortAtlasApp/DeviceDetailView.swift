@@ -31,7 +31,7 @@ struct DeviceDetailView: View {
         if let node { return store.mapTitle(for: node) }
         return socket?.port.name ?? display?.name ?? connectors.first?.label ?? "This Mac"
     }
-    private var isMac: Bool { store.selection == .mac }
+    private var isMac: Bool { store.selection == .mac || store.selection == nil }
     private var subtitle: String {
         if isMac { return store.snapshot.modelIdentifier }
         if display != nil { return "Display" }
@@ -50,7 +50,7 @@ struct DeviceDetailView: View {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { store.selection = nil } label: { Image(systemName: "xmark").frame(width: 24, height: 24) }.help("Hide inspector · Escape").accessibilityLabel("Hide inspector")
+                Button { store.hideInspector() } label: { Image(systemName: "xmark").frame(width: 24, height: 24) }.help("Hide inspector · Escape").accessibilityLabel("Hide inspector")
             }.buttonStyle(.borderless).padding(20)
             Divider()
             ScrollView {

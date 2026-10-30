@@ -4,7 +4,8 @@ import SwiftUI
 /// on light content surfaces. AppKit resolves the colors for the active appearance.
 enum MapPalette {
     static let data = adaptive(.systemTeal, light: NSColor(srgbRed: 0.0, green: 0.42, blue: 0.50, alpha: 1))
-    static let display = adaptive(.systemRed, light: NSColor(srgbRed: 0.80, green: 0.12, blue: 0.16, alpha: 1))
+    // Purple, not red: red reads as an error state on an otherwise healthy connection.
+    static let display = adaptive(.systemPurple, light: NSColor(srgbRed: 0.47, green: 0.18, blue: 0.70, alpha: 1))
     static let incoming = adaptive(.systemGreen, light: NSColor(srgbRed: 0.0, green: 0.46, blue: 0.22, alpha: 1))
     static let outgoing = adaptive(.systemOrange, light: NSColor(srgbRed: 0.71, green: 0.285, blue: 0.0, alpha: 1))
     private static func adaptive(_ dark: NSColor, light: NSColor) -> Color {

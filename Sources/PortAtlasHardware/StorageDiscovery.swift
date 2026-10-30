@@ -8,7 +8,10 @@ enum StorageDiscovery {
     static func volumes(deviceIDs: Set<String>) -> [StorageVolume] {
         guard let session = DASessionCreate(kCFAllocatorDefault) else { return [] }
         let keys: Set<URLResourceKey> = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey]
-        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: Array(keys), options: [.skipHiddenVolumes]) ?? []
+        // Capacity reads on an unresponsive network share can block discovery, and
+        // network volumes never descend from a USB device, so only local volumes are queried.
+        let urls = (FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeIsLocalKey], options: [.skipHiddenVolumes]) ?? [])
+            .filter { (try? $0.resourceValues(forKeys: [.volumeIsLocalKey]).volumeIsLocal) == true }
         return urls.compactMap { url in
             guard let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url as CFURL),
                   let media = DADiskCopyIOMedia(disk) as io_service_t?, media != 0 else { return nil }

@@ -84,7 +84,8 @@ struct PortSettingsView: View {
             }.padding(30)
         }
         .sheet(isPresented: $showingPortMatcher) { PortMatchingView().environmentObject(store) }
-        .onChange(of: store.configuration) { _, _ in store.saveSettings() }
+        .onChange(of: store.configuration) { _, _ in store.scheduleSave() }
+        .onDisappear { store.flushPendingSave() }
         .alert("Reset port settings?", isPresented: $confirmReset) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { store.resetSettings() }

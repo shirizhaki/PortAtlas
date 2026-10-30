@@ -60,6 +60,8 @@ struct MapViewport<Content: View>: View {
     @GestureState private var pinch = MapPinch()
     @ViewState private var naturalSize = CGSize.zero
     @ViewState private var tapExclusions = MapTapExclusions()
+    /// A map rebuilt in fit mode refits once measured; the window may have resized while it was hidden.
+    @ViewState private var refitOnMeasure = true
     private let range: ClosedRange<CGFloat> = 0.35...2.5
     private var state: MapViewportState { kind == .physical ? store.physicalViewport : store.logicalViewport }
     private var scale: CGFloat { min(range.upperBound, max(range.lowerBound, state.zoom * pinch.magnification)) }
@@ -124,7 +126,8 @@ struct MapViewport<Content: View>: View {
                 let natural = CGSize(width: size.width / scale, height: size.height / scale)
                 if abs(natural.width - naturalSize.width) > 0.5 || abs(natural.height - naturalSize.height) > 0.5 { naturalSize = natural }
                 // Attach/detach and telemetry do not reset a user's view.
-                if measured.ready && !state.initialized { fit(viewport, content: natural) }
+                if measured.ready && (!state.initialized || (refitOnMeasure && state.fitMode)) { fit(viewport, content: natural) }
+                if measured.ready { refitOnMeasure = false }
             }
             .onChange(of: store.fitRevision) { _, _ in if store.activeMapKind == kind { fit(viewport) } }
             .onChange(of: viewport) { _, size in if state.fitMode { fit(size) } }

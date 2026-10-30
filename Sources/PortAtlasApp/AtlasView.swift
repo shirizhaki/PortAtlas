@@ -20,9 +20,9 @@ struct AtlasView: View {
             }
             Divider()
             HStack(spacing: 0) {
-                ZStack {
-                    PhysicalMapView().opacity(logical ? 0 : 1).allowsHitTesting(!logical).disabled(logical).accessibilityHidden(logical)
-                    TopologyCanvas().opacity(logical ? 1 : 0).allowsHitTesting(logical).disabled(!logical).accessibilityHidden(!logical)
+                // Only the active map is built; each map's zoom and pan live in the store.
+                Group {
+                    if logical { TopologyCanvas() } else { PhysicalMapView() }
                 }
                 if store.selection != nil {
                     Divider()
@@ -43,7 +43,7 @@ struct AtlasView: View {
             Task { @MainActor in await Task.yield(); store.updateTelemetryVisibility() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { store.updateFullScreenState($0); store.updateTelemetryVisibility() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didUpdateNotification)) { _ in store.updateTelemetryVisibility() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { _ in store.updateTelemetryVisibility() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.updateTelemetryVisibility() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in store.updateTelemetryVisibility() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in store.updateTelemetryVisibility() }

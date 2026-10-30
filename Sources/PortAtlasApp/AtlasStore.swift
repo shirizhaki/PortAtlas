@@ -9,10 +9,14 @@ enum AtlasSelection: Equatable {
 
 @MainActor
 final class AtlasStore: ObservableObject {
-    @Published private(set) var liveSnapshot = TopologySnapshot.empty
+    @Published private(set) var liveSnapshot = TopologySnapshot.empty { didSet { rebuildPresentation(); rebuildTopology() } }
     @Published private(set) var displays: [DisplayDevice] = []
-    @Published var configuration = PortConfiguration()
-    @Published var selection: AtlasSelection?
+    @Published var configuration = PortConfiguration() { didSet { rebuildTopology() } }
+    @Published var selection: AtlasSelection? { didSet { rebuildRoute() } }
+    /// Derived once per input change. The animated map reads these on every frame.
+    private(set) var physicalTopology = PhysicalTopology(snapshot: .empty, configuration: PortConfiguration())
+    private(set) var presentation = PhysicalPresentation(snapshot: .empty)
+    private(set) var routeNodeIDs: Set<String> = []
     var selectedID: String? {
         get { if case .device(let id) = selection { return id }; return nil }
         set { selection = newValue.map(AtlasSelection.device) }
@@ -72,7 +76,15 @@ final class AtlasStore: ObservableObject {
         }
         return keys
     }
-    var routeNodeIDs: Set<String> {
+    private func rebuildTopology() {
+        physicalTopology = PhysicalTopology(snapshot: snapshot, configuration: configuration)
+        rebuildRoute()
+    }
+    private func rebuildPresentation() {
+        presentation = PhysicalPresentation(snapshot: snapshot, preferences: componentPreferences)
+    }
+    private func rebuildRoute() { routeNodeIDs = computeRouteNodeIDs() }
+    private func computeRouteNodeIDs() -> Set<String> {
         switch selection {
         case .device(let id), .connection(let id): return Set(snapshot.ancestry(of: id).map(\.id))
         case .socket(let id):
@@ -87,7 +99,9 @@ final class AtlasStore: ObservableObject {
     func emphasis(for socket: SocketConnection) -> Double {
         if case .socket(let id) = selection { return id == socket.id ? 1 : 0.35 }
         if case .connector(let id) = selection { return socket.connectors.contains { $0.id == id } ? 1 : 0.35 }
-        return routeNodeIDs.isEmpty || snapshot.nodes.contains { node in routeNodeIDs.contains(node.id) && socket.connectors.contains { $0.id == snapshot.connectorPath(for: node.id) } } ? 1 : 0.35
+        if routeNodeIDs.isEmpty { return 1 }
+        let paths = Set(socket.connectors.map(\.id))
+        return routeNodeIDs.contains { id in snapshot.connectorPath(for: id).map(paths.contains) == true } ? 1 : 0.35
     }
     var liveInput: PowerMeasurement? { powerSample.liveInput(at: Date()) }
     var powerStatus: MacPowerStatus { Date().timeIntervalSince(powerSample.sampledAt) <= 5 ? powerSample.status : snapshot.powerStatus }
@@ -97,7 +111,8 @@ final class AtlasStore: ObservableObject {
         return display.mapLabel
     }
     func updateTelemetryVisibility() {
-        setTelemetryVisible(!NSApp.isHidden && mapWindows.allObjects.contains { $0.isVisible && !$0.isMiniaturized })
+        // Occlusion also covers windows hidden behind others or on another Space.
+        setTelemetryVisible(!NSApp.isHidden && mapWindows.allObjects.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) })
     }
     func registerMapWindow(_ window: NSWindow) {
         mapWindows.add(window)
@@ -144,12 +159,11 @@ final class AtlasStore: ObservableObject {
             }
         }
     }
-    @Published private(set) var componentPreferences = ComponentPlacementPreferences()
+    @Published private(set) var componentPreferences = ComponentPlacementPreferences() { didSet { rebuildPresentation() } }
     @Published private(set) var componentLayoutError: String?
     private var componentLayoutNeedsReset = false
     private let componentStore = ComponentPlacementStore.standard
     @Published var expandedComponents: Set<String> = []
-    var presentation: PhysicalPresentation { PhysicalPresentation(snapshot: snapshot, preferences: componentPreferences) }
     @Published var collapsed: Set<String> = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var discoveryError: String?
@@ -157,6 +171,7 @@ final class AtlasStore: ObservableObject {
     @Published private(set) var settingsError: String?
     @Published private(set) var settingsNeedReset = false
     private var displayObserver: NSObjectProtocol?
+    private var terminationObserver: NSObjectProtocol?
     private var displaySettlingTask: Task<Void, Never>?
     private var volumeObservers: [NSObjectProtocol] = []
     private(set) var attachmentHistory = AttachmentHistory()
@@ -169,15 +184,14 @@ final class AtlasStore: ObservableObject {
         return topology.sockets.filter { !$0.devices.isEmpty || $0.connectors.contains { $0.connectionActive == true || !$0.links.isEmpty } }.count +
             topology.unplaced.filter { !$0.devices.isEmpty || $0.connector?.connectionActive == true || $0.connector?.links.isEmpty == false }.count
     }
-    var physicalTopology: PhysicalTopology {
-        PhysicalTopology(snapshot: snapshot, configuration: configuration)
-    }
 
     init() {
         do { configuration = try settingsStore.load() }
         catch { settingsError = "Saved port settings could not be read. Reset them to enable saving."; settingsNeedReset = true }
         do { componentPreferences = try componentStore.load() }
         catch { componentLayoutError = "Saved component layout could not be read."; componentLayoutNeedsReset = true }
+        // Property observers do not run during init.
+        rebuildPresentation(); rebuildTopology()
         monitor = USBMonitor { [weak self] in self?.refresh() }
         do { try monitor?.start() }
         catch { monitoringError = "Automatic updates unavailable: \(error.localizedDescription)" }
@@ -186,32 +200,41 @@ final class AtlasStore: ObservableObject {
                 Task { @MainActor in self?.refresh(); self?.updateTelemetryVisibility() }
             })
         }
+        terminationObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushPendingSave() }
+        }
         volumeObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.setTelemetryVisible(false) }
         })
-        updateDisplays()
         displayObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.updateDisplays(); self.refresh()
+                self.refresh()
                 self.displaySettlingTask?.cancel()
                 self.displaySettlingTask = Task { @MainActor [weak self] in
                     do { try await Task.sleep(for: .milliseconds(1200)) } catch { return }
-                    self?.updateDisplays(); self?.refresh()
+                    self?.refresh()
                 }
             }
         }
         refresh()
     }
-    private func updateDisplays() {
+    /// NSScreen is main-thread only; the registry and mode reads run with discovery off the main thread.
+    private static func externalScreens() -> [(id: UInt32, name: String)] {
+        NSScreen.screens.compactMap { screen in
+            guard let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
+                  CGDisplayIsBuiltin(id) == 0 else { return nil }
+            return (id, screen.localizedName)
+        }
+    }
+    nonisolated private static func scanDisplays(_ screens: [(id: UInt32, name: String)]) -> [DisplayDevice] {
+        guard !screens.isEmpty else { return [] }
         let signals = DisplayDiscovery.signals()
         let capacities = DisplayDiscovery.linkCapacities()
         let edids = DisplayDiscovery.edids()
-        displays = NSScreen.screens.compactMap { screen in
-            guard let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
-                  CGDisplayIsBuiltin(id) == 0 else { return nil }
+        return screens.map { id, name in
             let mode = CGDisplayCopyDisplayMode(id)
-            return DisplayDevice(id: id, name: screen.localizedName, width: mode?.width ?? CGDisplayPixelsWide(id), height: mode?.height ?? CGDisplayPixelsHigh(id), refreshRate: mode?.refreshRate,
+            return DisplayDevice(id: id, name: name, width: mode?.width ?? CGDisplayPixelsWide(id), height: mode?.height ?? CGDisplayPixelsHigh(id), refreshRate: mode?.refreshRate,
                 signal: signals[id]?.signal, nativeResolution: signals[id]?.nativeResolution,
                 renderedResolution: mode.flatMap { DisplayResolution(width: $0.pixelWidth, height: $0.pixelHeight) }, linkCapacity: capacities[id], edid: edids[id], availableModes: DisplayDiscovery.availableModes(for: id))
         }
@@ -219,20 +242,24 @@ final class AtlasStore: ObservableObject {
     deinit {
         telemetryTask?.cancel(); networkTask?.cancel(); displaySettlingTask?.cancel()
         if let displayObserver { NotificationCenter.default.removeObserver(displayObserver) }
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
         for observer in volumeObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
     func refresh() {
         guard !isRefreshing else { refreshAgain = true; return }
         isRefreshing = true
         Task {
-            let result = await Task.detached(priority: .utility) { Result { try USBDiscovery.snapshot() } }.value
+            let screens = Self.externalScreens()
+            let (result, scannedDisplays) = await Task.detached(priority: .utility) {
+                (Result { try USBDiscovery.snapshot() }, Self.scanDisplays(screens))
+            }.value
+            displays = scannedDisplays
             switch result {
             case .success(let snapshot):
                 expandedComponents.formIntersection(Set(snapshot.nodes.map(\.id)))
                 attachmentHistory.observe(snapshot)
                 let previousRoute = powerRoute?.connectorID
                 liveSnapshot = snapshot; discoveryError = nil
-                updateDisplays()
                 if previousRoute != powerRoute?.connectorID || powerSample.status.externalPower != snapshot.powerStatus.externalPower {
                     powerHistory.reset()
                     powerSample = PowerSample(status: snapshot.powerStatus)
@@ -254,7 +281,21 @@ final class AtlasStore: ObservableObject {
         default: break
         }
     }
+    private var pendingSave: Task<Void, Never>?
+    /// Typing a port name changes the configuration per keystroke; write once typing pauses.
+    func scheduleSave() {
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            self?.saveSettings()
+        }
+    }
+    func flushPendingSave() {
+        guard pendingSave != nil else { return }
+        saveSettings()
+    }
     func saveSettings() {
+        pendingSave?.cancel(); pendingSave = nil
         guard !settingsNeedReset else { return }
         do { try settingsStore.save(configuration); settingsError = nil }
         catch { settingsError = "Port settings could not be saved: \(error.localizedDescription)" }

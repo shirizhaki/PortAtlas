@@ -124,11 +124,23 @@ public struct TopologySnapshot: Sendable {
     public let thunderboltDevices: [ThunderboltDevice]
     public let formFactor: MacFormFactor
     public let storage: [StorageVolume]
+    /// Lookup indices built once; the map queries ancestry and children on every frame.
+    private let nodeIndex: [String: Int]
+    private let childIndex: [String: [HardwareNode]]
+    public let roots: [HardwareNode]
     public init(nodes: [HardwareNode], modelIdentifier: String, notices: [String] = [], capturedAt: Date = Date(), connectors: [HardwareConnector] = [], storage: [StorageVolume] = [], formFactor: MacFormFactor = .laptop, powerStatus: MacPowerStatus = MacPowerStatus(), thunderboltDevices: [ThunderboltDevice] = []) {
         self.nodes = nodes; self.modelIdentifier = modelIdentifier
         self.notices = notices; self.capturedAt = capturedAt
         self.connectors = connectors; self.storage = storage; self.formFactor = formFactor
         self.powerStatus = powerStatus; self.thunderboltDevices = thunderboltDevices
+        // The first node wins for a duplicate ID, matching the previous linear search.
+        var index: [String: Int] = [:]
+        for (offset, node) in nodes.enumerated() where index[node.id] == nil { index[node.id] = offset }
+        nodeIndex = index
+        childIndex = Dictionary(grouping: nodes.filter { $0.parentID != nil }, by: { $0.parentID! })
+            .mapValues { $0.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } }
+        roots = nodes.filter { node in node.parentID.map { index[$0] == nil } ?? true }
+            .sorted { $0.registryPath < $1.registryPath }
     }
     public static let empty = TopologySnapshot(nodes: [], modelIdentifier: "Unknown Mac")
     public var powerRoute: PowerRoute? { PowerRouting.resolve(connectors: connectors, externalPower: powerStatus.externalPower) }
@@ -138,14 +150,8 @@ public struct TopologySnapshot: Sendable {
         return matched.count + roots.filter { connectorPath(for: $0.id) == nil }.count
     }
     public var deviceCount: Int { nodes.filter { $0.kind == .device || $0.kind == .hub }.count }
-    public func node(_ id: String?) -> HardwareNode? { nodes.first { $0.id == id } }
-    public func children(of id: String) -> [HardwareNode] {
-        nodes.filter { $0.parentID == id }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-    public var roots: [HardwareNode] {
-        nodes.filter { node in node.parentID == nil || !nodes.contains { $0.id == node.parentID } }
-            .sorted { $0.registryPath < $1.registryPath }
-    }
+    public func node(_ id: String?) -> HardwareNode? { id.flatMap { nodeIndex[$0] }.map { nodes[$0] } }
+    public func children(of id: String) -> [HardwareNode] { childIndex[id] ?? [] }
     /// Bounded traversal also makes malformed fixtures and a disappearing parent safe.
     public func ancestry(of id: String) -> [HardwareNode] {
         var result: [HardwareNode] = [], visited: Set<String> = []

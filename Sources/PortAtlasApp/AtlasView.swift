@@ -64,7 +64,8 @@ struct AtlasView: View {
                 Picker("Map view", selection: Binding(get: { logical }, set: { store.activeMapKind = $0 ? .logical : .physical })) {
                     Text("Physical").tag(false)
                     Text("Logical").tag(true)
-                }.labelsHidden().pickerStyle(.segmented).frame(width: 200)
+                // Natural size: the toolbar fits its glass to the control, so a fixed frame left it off-center.
+                }.labelsHidden().pickerStyle(.segmented).fixedSize()
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 if let input = store.liveInput {

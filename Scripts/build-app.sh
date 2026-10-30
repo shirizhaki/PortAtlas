@@ -10,7 +10,16 @@ cp "$binary_dir/PortAtlas" "$app_dir/Contents/MacOS/PortAtlas"
 # Remove local source paths carried by debug symbols before packaging.
 strip -S "$app_dir/Contents/MacOS/PortAtlas"
 cp Packaging/Info.plist "$app_dir/Contents/Info.plist"
-cp Packaging/AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
+# The Icon Composer document compiles to Assets.car (the Liquid Glass icon on macOS 26+)
+# plus AppIcon.icns for earlier macOS. Without full Xcode, ship the prebuilt flat icon.
+if xcrun --find actool >/dev/null 2>&1; then
+    icon_plist="$(mktemp)"
+    xcrun actool "$PWD/Packaging/AppIcon.icon" --compile "$PWD/$app_dir/Contents/Resources" --platform macosx \
+        --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist "$icon_plist" >/dev/null
+    rm -f "$icon_plist"
+else
+    cp Packaging/AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
+fi
 cp LICENSE "$app_dir/Contents/Resources/LICENSE"
 cp ThirdPartyNotices/WhatPort-LICENSE.txt "$app_dir/Contents/Resources/WhatPort-LICENSE.txt"
 cp Packaging/PrivacyInfo.xcprivacy "$app_dir/Contents/Resources/PrivacyInfo.xcprivacy"

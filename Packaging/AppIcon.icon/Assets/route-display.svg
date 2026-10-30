@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g id="motif" transform="translate(512 512) scale(1.12) translate(-512 -517)">
+  <path d="M512 492 V300" stroke="#BF5AF2" stroke-width="40" stroke-linecap="round" fill="none"/>
+  <circle cx="512" cy="248" r="52" fill="#BF5AF2"/>
+  </g>
+</svg>

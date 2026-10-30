@@ -17,10 +17,14 @@ public struct NetworkLink: Identifiable, Equatable, Sendable {
         self.id = id; self.deviceID = deviceID; self.isActive = isActive
         self.bitsPerSecond = bitsPerSecond; self.sampledAt = sampledAt
     }
+    /// A physical Ethernet port reports a link speed once a cable is in, or that no cable is in.
+    /// Virtual interfaces, such as the ones an iPhone exposes over USB for Personal Hotspot and
+    /// syncing, report an active link with no speed, and are not shown as Ethernet.
+    public var isPhysicalPort: Bool { isActive == false || (isActive == true && bitsPerSecond != nil) }
     public var label: String {
-        if isActive == false { return "Ethernet · no link" }
-        guard isActive == true, let bitsPerSecond else { return "Ethernet · speed not reported" }
-        return bitsPerSecond >= 1_000_000_000 ? String(format: "Ethernet · %g Gb/s", bitsPerSecond / 1_000_000_000)
-            : String(format: "Ethernet · %g Mb/s", bitsPerSecond / 1_000_000)
+        if isActive == false { return "No cable" }
+        guard isActive == true, let bitsPerSecond else { return "Connected" }
+        return bitsPerSecond >= 1_000_000_000 ? String(format: "%g Gb/s", bitsPerSecond / 1_000_000_000)
+            : String(format: "%g Mb/s", bitsPerSecond / 1_000_000)
     }
 }

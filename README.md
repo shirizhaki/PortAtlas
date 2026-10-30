@@ -2,7 +2,7 @@
 
 A native macOS app that maps the devices connected to your Mac: USB, Thunderbolt/USB4, storage, external displays, and available power readings.
 
-**Early 0.1.0 preview · Apple Silicon · macOS 14 or newer.** PortAtlas reads local hardware information. It has no network services or analytics. Hardware and macOS versions expose different amounts of information; missing or ambiguous readings stay unavailable.
+**Early 0.1.0 preview · Apple Silicon · macOS 26 or newer.** PortAtlas reads local hardware information. It has no network services or analytics. Hardware and macOS versions expose different amounts of information; missing or ambiguous readings stay unavailable.
 
 **Physical view** — connections grouped by the Mac's physical sockets, with downstream devices, display routing, and available power readings.
 
@@ -55,7 +55,7 @@ The development app is unsandboxed. Discovery uses public IOKit entry points and
 
 ## Build locally
 
-**Build tools:** Xcode 26+ with the macOS 26 SDK, or matching Command Line Tools for the Swift-package build. The runtime minimum remains macOS 14. Full Xcode is required for the `.xcodeproj` target. No external packages are downloaded.
+**Build tools:** Xcode 26+ with the macOS 26 SDK, or matching Command Line Tools for the Swift-package build. The runtime minimum is macOS 26. Full Xcode is required for the `.xcodeproj` target. No external packages are downloaded.
 
 Open `PortAtlas.xcodeproj`, select the **PortAtlas** scheme, and Run. Local signing is disabled. Alternatively:
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g id="motif" transform="translate(512 512) scale(1.12) translate(-512 -517)">
+  <!-- USB-C receptacle: shell ring, center tongue and the cable trunk leaving it. -->
+  <path fill="#FFFFFF" fill-rule="evenodd" d="M372 566 H652 A110 110 0 0 1 652 786 H372 A110 110 0 0 1 372 566 Z M372 614 A62 62 0 0 0 372 738 H652 A62 62 0 0 0 652 614 Z"/>
+  <rect x="392" y="664" width="240" height="24" rx="12" fill="#FFFFFF"/>
+  <path d="M512 566 V492" stroke="#FFFFFF" stroke-width="40" stroke-linecap="round" fill="none"/>
+  </g>
+</svg>

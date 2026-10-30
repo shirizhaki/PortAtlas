@@ -1,0 +1,27 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.10000,0.34000,0.78000,1.00000",
+      "display-p3:0.03000,0.11000,0.32000,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [ { "glass" : true, "image-name" : "socket.svg", "name" : "socket" } ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.2 }
+    },
+    {
+      "layers" : [
+        { "glass" : true, "image-name" : "route-data.svg", "name" : "data" },
+        { "glass" : true, "image-name" : "route-display.svg", "name" : "display" },
+        { "glass" : true, "image-name" : "route-power.svg", "name" : "power" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.3 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}

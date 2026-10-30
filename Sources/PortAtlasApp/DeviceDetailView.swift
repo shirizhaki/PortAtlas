@@ -1,9 +1,13 @@
 import SwiftUI
 import PortAtlasCore
 
-/// One inspector for the Mac, physical sockets, devices and individual routes.
+/// The inspector. Each item gets a plain-language summary first; everything technical sits in
+/// one Technical Details section at the bottom, without explanations.
 struct DeviceDetailView: View {
     @EnvironmentObject private var store: AtlasStore
+
+    // MARK: What is selected
+
     private var node: HardwareNode? {
         switch store.selection {
         case .device(let id), .connection(let id): return store.snapshot.node(id)
@@ -11,310 +15,296 @@ struct DeviceDetailView: View {
         default: return nil
         }
     }
-    private var socket: SocketConnection? {
-        if case .socket(let id) = store.selection { return store.physicalTopology.sockets.first { $0.id == id } }
-        if case .connector(let id) = store.selection { return store.physicalTopology.sockets.first { $0.connectors.contains { $0.id == id } } }
-        if let node, let port = store.physicalPort(for: node) { return store.physicalTopology.sockets.first { $0.id == port.id } }
-        return nil
-    }
-    private var connectors: [HardwareConnector] {
-        if let socket { return socket.connectors }
-        if case .connector(let id) = store.selection { return store.snapshot.connectors.filter { $0.id == id } }
-        if let node, let path = store.snapshot.connectorPath(for: node.id) { return store.snapshot.connectors.filter { $0.id == path } }
-        return []
-    }
     private var display: DisplayDevice? {
         if case .display(let id) = store.selection { return store.displays.first { $0.id == id } }
         return node?.displayID.flatMap { id in store.displays.first { $0.id == id } }
     }
-    private var title: String {
-        if let node { return store.mapTitle(for: node) }
-        return socket?.port.name ?? display?.name ?? connectors.first?.label ?? "This Mac"
-    }
-    private var isMac: Bool { store.selection == .mac || store.selection == nil }
-    private var subtitle: String {
-        if isMac { return store.snapshot.modelIdentifier }
-        if display != nil { return "Display" }
-        if let node {
-            if node.kind == .controller { return "USB host controller" }
-            return node.kind == .port ? (node.transport ?? "USB branch") : node.deviceDescription
+    /// A port is selected directly, never inferred from a device.
+    private var socket: SocketConnection? {
+        switch store.selection {
+        case .socket(let id): return store.physicalTopology.sockets.first { $0.id == id }
+        case .connector(let id): return store.physicalTopology.sockets.first { $0.connectors.contains { $0.id == id } }
+        default: return nil
         }
-        return socket?.isMagSafe == true ? "Power port" : "Physical port"
     }
+    private var portConnectors: [HardwareConnector] {
+        if let socket { return socket.connectors }
+        if case .connector(let id) = store.selection { return store.snapshot.connectors.filter { $0.id == id } }
+        return []
+    }
+    private var isPort: Bool { socket != nil || !portConnectors.isEmpty }
+
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label(title, systemImage: isMac ? (store.snapshot.formFactor == .laptop ? "laptopcomputer" : "desktopcomputer") : display != nil ? "display" : node?.symbol ?? "cable.connector")
-                        .font(.headline).lineLimit(2).textSelection(.enabled)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button { store.hideInspector() } label: { Image(systemName: "xmark").frame(width: 24, height: 24) }.help("Hide inspector · Escape").accessibilityLabel("Hide inspector")
-            }.buttonStyle(.borderless).padding(20)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if isMac { macDetails }
-                    else {
-                        if node?.kind != .controller { group("Connection") {
-                            if let socket {
-                                if node?.kind == .device || node?.kind == .hub { fact("Physical port", socket.port.name) }
-                                else { fact("Side", socket.port.side.label) }
-                                if socket.devices.isEmpty && !socket.connectors.isEmpty && socket.connectors.allSatisfy({ $0.connectionActive == false }) {
-                                    fact("Status", "Not connected")
-                                } else if socket.connectors.isEmpty { fact("Status", socket.status)
-                                } else { fact(node?.kind == .device || node?.kind == .hub ? "Upstream connection" : "Connection", store.connectionLabel(for: socket)) }
-                            } else if node?.kind != .controller { fact("Physical port", "Unknown") }
-                            if let node {
-                                if node.displayID == nil && (node.kind == .device || node.kind == .hub) { fact("Connection speed", node.speed?.label ?? "Unavailable") }
-                                if let parent = store.snapshot.connectionParent(of: node.id) {
-                                    Button { store.selectedID = parent.id } label: { Label("Via " + store.mapTitle(for: parent), systemImage: parent.symbol) }.buttonStyle(.link)
-                                }
-                                if node.isUSB4Tunnel == true { fact("Transport", "USB4 tunnel") }
-                            }
-                            if node == nil, !connectors.isEmpty {
-                                if socket == nil { fact("Status", connectors.contains { $0.connectionActive == true } ? "Connected" : connectors.allSatisfy { $0.connectionActive == false } ? "Not connected" : "Unavailable") }
-                            }
-                        } }
-                        if let node, store.canPlaceComponent(node) { componentPlacement(node) }
-                        if let display { displayDetails(display) }
-                        if !connectors.isEmpty || socket != nil { connectorDetails }
-                        if let node { deviceDetails(node) }
-                    }
-                }.padding(20)
-            }
-        }.background(MapContentBackground(inspector: true))
-        .frame(minWidth: 300, idealWidth: 340, maxWidth: 360)
+        Form {
+            header
+            if let display { displaySections(display) }
+            else if let node { nodeSections(node) }
+            else if isPort { portSections }
+            else { macSections }
+        }
+        .formStyle(.grouped)
     }
-    @ViewBuilder private var macDetails: some View {
-        group("Power") {
-            fact("Status", store.powerSample.chargingLabel)
-            if let percentage = store.powerSample.batteryPercent { fact("Battery", "\(percentage)%") }
+
+    // MARK: Header
+
+    private var header: some View {
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: headerSymbol).font(.title2).foregroundStyle(.secondary).frame(width: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(headerTitle).font(.headline).lineLimit(2).textSelection(.enabled)
+                    Text(headerSummary).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }.padding(.vertical, 2)
+        }
+    }
+    private var headerSymbol: String {
+        if display != nil { return "display" }
+        if let node { return node.symbol }
+        if let socket { return socket.isMagSafe ? "powerplug" : socket.isHDMI ? "tv" : "cable.connector" }
+        if isPort { return "cable.connector" }
+        return store.macProduct.symbol
+    }
+    private var headerTitle: String {
+        if let display { return display.name }
+        if let node { return store.mapTitle(for: node) }
+        if let socket { return socket.port.name }
+        return portConnectors.first?.label ?? store.macName
+    }
+    private var headerSummary: String {
+        if let display { return display.mapLabel }
+        if let node { return nodeSummary(node) }
+        if let socket { return isActive(socket) ? store.connectionLabel(for: socket) : "Nothing connected" }
+        if isPort { return portConnectors.contains { $0.connectionActive == true } ? "Connected" : "Nothing connected" }
+        return store.powerSample.chargingLabel
+    }
+
+    // MARK: This Mac
+
+    @ViewBuilder private var macSections: some View {
+        Section("Power") {
             if let input = store.liveInput {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Current power input").font(.caption).foregroundStyle(.secondary)
-                    Text(input.label).font(.system(.title, design: .rounded).weight(.medium)).monospacedDigit().foregroundStyle(MapPowerStyle.incoming)
-                }.accessibilityElement(children: .combine)
-                PowerGraph(samples: store.powerHistory.samples).frame(height: 80)
-                if let voltage = store.powerSample.inputVoltage, voltage.isFresh(at: Date()) { fact("Input voltage", voltage.label) }
-                if let current = store.powerSample.inputCurrent, current.isFresh(at: Date()) { fact("Input current", current.label) }
-            } else if store.powerStatus.externalPower == true { fact("Current power input", "Unavailable") }
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Power in") {
+                        Text(input.label).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(MapPowerStyle.incoming)
+                    }
+                    PowerGraph(samples: store.powerHistory.samples).frame(height: 64)
+                }
+            }
+            if let percent = store.powerSample.batteryPercent { row("Battery", "\(percent)%") }
+            if let charger = chargerDescription { row("Charger", charger) }
+            if let route = store.powerRoute {
+                LabeledContent("Charging through") {
+                    Button(portName(for: route.connectorID)) { store.selection = .connector(route.connectorID) }.buttonStyle(.link)
+                }.help("Inferred from the port's negotiated power contract.")
+            }
+            if let total = store.totalOutput {
+                row("Powering accessories", String(format: "%.1f W", total))
+                    .help("Measured at the Mac's ports. Ports that don't report are not included.")
+            }
+        }
+        technicalDetails {
+            if let name = store.snapshot.productName { row("Model", name) }
+            row("Identifier", store.snapshot.modelIdentifier)
+            if let voltage = store.powerSample.inputVoltage, voltage.isFresh(at: Date()) { row("Input voltage", voltage.label) }
+            if let current = store.powerSample.inputCurrent, current.isFresh(at: Date()) { row("Input current", current.label) }
             if let battery = store.powerSample.battery, battery.isFresh(at: Date()) {
-                fact(battery.value < 0 ? "Battery discharge" : battery.value > 0 ? "Battery charging" : "Battery power", String(format: "%.1f W", abs(battery.value)))
+                row(battery.value < 0 ? "Battery discharge" : "Battery charge", String(format: "%.1f W", abs(battery.value)))
             }
-            if let watts = store.powerStatus.adapterWatts, store.powerStatus.externalPower == true { fact("Adapter rating", "\(watts) W") }
-            if let name = store.powerSample.adapterName { fact("Adapter", name) }
-            if let route = store.powerRoute, let connector = store.snapshot.connectors.first(where: { $0.id == route.connectorID }) {
-                Button { store.selection = .connector(connector.id) } label: { Label("Input via " + connector.label + " (inferred)", systemImage: "bolt.fill") }.buttonStyle(.link)
-            } else if store.powerStatus.externalPower == true { fact("Input port", "Unknown") }
-            DisclosureGroup("Measurement details") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Power input covers the whole Mac. Battery power is calculated separately from battery voltage and current.")
-                    if store.liveInput?.source.hasPrefix("AppleSmartBattery") == true {
-                        Text("Using battery-controller telemetry. These readings can update more slowly than the live SMC source.")
-                    }
-                    if let source = store.liveInput?.source { fact("Input source", source) }
-                    if let route = store.powerRoute { Text(route.label) }
-                    Text("The adapter rating and negotiated power limit describe available power, not current consumption.")
-                }.font(.caption).foregroundStyle(.secondary).padding(.top, 8)
-            }.font(.callout)
-        }
-        if let total = store.totalOutput { group("Power supplied") {
-            fact("Total measured output", String(format: "%.1f W", total))
-            Text("Sum of available Mac-port measurements; unreported ports are not included.").font(.caption).foregroundStyle(.secondary)
-        } }
-        if !store.displays.isEmpty { group("Displays") {
-            ForEach(store.displays) { display in
-                Button { store.selection = .display(display.id) } label: { Label(display.name, systemImage: "display") }.buttonStyle(.link)
-                Text(store.displayLabel(display.id) ?? "").font(.caption).foregroundStyle(.secondary)
-            }
-        } }
-    }
-    private func componentPlacement(_ node: HardwareNode) -> some View {
-        group("Physical placement") {
-            Picker("Placement", selection: Binding(get: { store.presentation.placement(for: node) }, set: { store.setPlacement($0, for: node) })) {
-                ForEach(ComponentPlacement.allCases, id: \.self) { Text($0.label).tag($0) }
-            }.pickerStyle(.menu)
-            Text("Applies to Physical view only. Logical view keeps the reported connections.").font(.caption).foregroundStyle(.secondary)
-            if let error = store.componentLayoutError {
-                Text(error).font(.caption).foregroundStyle(.secondary)
-                Button("Reset saved component layout") { store.resetComponentLayout() }.buttonStyle(.link)
-            }
+            if let source = store.liveInput?.source { row("Reading source", source) }
         }
     }
-    private func displayDetails(_ display: DisplayDevice) -> some View {
-        group("Display") {
-            fact("Signal", display.mapLabel)
-            if let signal = display.signal {
-                fact("Refresh mode", signal.variableRefreshRange != nil ? "Variable timing selected" : "Variable timing not reported")
-                fact("Nominal refresh rate", String(format: "%g Hz", (signal.refreshRate * 100).rounded() / 100))
-                if let range = signal.variableRefreshRange { fact("VRR range", range.label) }
-            } else if let rate = display.refreshRate {
-                fact("macOS mode rate", String(format: "%g Hz", rate))
-            }
-            fact("Instantaneous refresh rate", "Not reported")
-            fact("Looks like", "\(display.width) × \(display.height)")
-            if let native = display.nativeResolution { fact("Native resolution", native.label) }
-            if let rendered = display.renderedResolution, rendered != display.signal?.resolution {
-                fact("Rendered desktop", rendered.label)
-            }
-            if let clock = display.signal?.pixelClockHz { fact("Pixel clock", String(format: "%.2f MHz", clock / 1_000_000)) }
-            if let capacity = display.linkCapacity {
-                fact("Display link capacity", capacity.payloadLabel + " payload")
-                fact("Raw link rate", capacity.rawLabel)
-                fact("Link lanes", "\(capacity.lanes) × " + String(format: "%g Gb/s", capacity.gigabitsPerLane))
-            }
-            if node?.transport?.contains("tunnel") == true { fact("Reserved Thunderbolt bandwidth", "Unavailable") }
-            DisclosureGroup("Available modes (\(display.availableModes.count))") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Desktop modes currently offered by macOS for this connection. Scaled render sizes can differ from the signal sent to the display.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if display.availableModes.isEmpty { Text("Modes unavailable").font(.caption).foregroundStyle(.secondary) }
-                    ForEach(display.availableModes) { mode in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mode.label).font(.caption.monospacedDigit())
-                            if let render = mode.renderLabel { Text(render).font(.caption2).foregroundStyle(.secondary) }
+    private var chargerDescription: String? {
+        guard store.powerStatus.externalPower == true else { return nil }
+        let parts = [store.powerStatus.adapterWatts.map { "\($0) W" }, store.powerSample.adapterName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // MARK: Port
+
+    @ViewBuilder private var portSections: some View {
+        Section("Connection") {
+            if let socket {
+                row("Supports", socket.isMagSafe ? "MagSafe charging" : store.capabilityLabel(for: socket.port))
+                if socket.devices.isEmpty {
+                    if isActive(socket), !socket.isMagSafe { row("Connected", store.connectionLabel(for: socket)) }
+                } else {
+                    ForEach(socket.devices) { device in
+                        LabeledContent("Connected") {
+                            Button(store.mapTitle(for: device)) { store.selection = .device(device.id) }.buttonStyle(.link)
                         }
                     }
-                }.padding(.top, 8)
-            }.font(.caption)
-            DisclosureGroup("Display capabilities · EDID") {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let edid = display.edid {
-                        if let name = edid.name { fact("Display name", name) }
-                        fact("Manufacturer", edid.manufacturer)
-                        fact("Product ID", String(format: "0x%04X", edid.product))
-                        fact("Serial number", edid.serialText ?? (edid.serial == 0 ? "Not provided" : String(edid.serial)))
-                        fact("EDID version", edid.version)
-                        fact("Manufacture year", String(edid.manufactureYear))
-                        fact("EDID size", "\(edid.data.count) bytes · checksums verified")
-                        if !edid.detailedTimings.isEmpty {
-                            Text("Advertised detailed timings").font(.caption.weight(.semibold))
-                            ForEach(Array(edid.detailedTimings.enumerated()), id: \.offset) { _, timing in
-                                Text(timing.label).font(.caption.monospacedDigit())
-                            }
-                        }
-                        Text("Detailed timings decoded from EDID. Additional standard and extension video modes may be advertised; this list is not exhaustive. EDID describes the display, not the Mac port’s maximum capability.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Copy raw EDID") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(edid.hex, forType: .string)
-                        }.buttonStyle(.link)
-                    } else {
-                        Text("A unique, validated EDID is unavailable for this display.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }.padding(.top, 8)
-            }.font(.caption)
-            DisclosureGroup("About these readings") {
-                Text("Signal timing comes from the active display controller. A VRR range describes the selected variable timing. Nominal refresh rate is not a live measurement of HDMI refresh or application FPS. Missing VRR fields mean variable timing is not reported. Desktop scaling and render size can differ from the signal sent to the display.")
-                Text("Display link capacity describes the negotiated link. Video usage and reserved Thunderbolt bandwidth require additional hardware readings, including color format and compression.")
-            }.font(.caption).foregroundStyle(.secondary)
-            fact("Route", node != nil ? "Matched by display identity" : "Unknown")
-        }
-    }
-    private var connectorDetails: some View {
-        group(node?.kind == .device || node?.kind == .hub ? "Upstream port" : "Port") {
-            if let socket, socket.devices.isEmpty && !socket.connectors.contains(where: { $0.connectionActive == true }) {
-                fact("Port support", socket.isMagSafe ? "MagSafe" : store.capabilityLabel(for: socket.port))
+                }
             }
-            ForEach(connectors) { connector in
+            ForEach(portConnectors) { connector in
+                if let cable = connector.cable, connector.connectionActive == true { row("Cable", cable.productType) }
+            }
+        }
+        if portConnectors.contains(where: { powerFacts($0) }) {
+            Section("Power") {
+                ForEach(portConnectors) { connector in
+                    if connector.id == store.powerRoute?.connectorID {
+                        LabeledContent("Charging this Mac") {
+                            Text(store.liveInput?.label ?? "Yes").monospacedDigit().foregroundStyle(MapPowerStyle.incoming)
+                        }
+                    }
+                    if let output = store.output(for: connector.id) {
+                        LabeledContent("Powering accessory") {
+                            Text(output.label).monospacedDigit().foregroundStyle(MapPowerStyle.outgoing)
+                        }.help("Measured at the Mac's port.")
+                    }
+                    if let contract = connector.powerContractWatts, connector.connectionActive != false {
+                        row("Charger limit", "\(contract) W").help("The maximum the charger agreed to supply, not what is being drawn.")
+                    }
+                }
+            }
+        }
+        technicalDetails {
+            ForEach(portConnectors) { connector in
+                row("Connector", connector.label)
+                if let mv = connector.power?.voltageMillivolts { row("Negotiated voltage", String(format: "%.1f V", Double(mv) / 1000)) }
+                if let ma = connector.power?.currentMilliamps { row("Negotiated current", String(format: "%.2f A", Double(ma) / 1000)) }
+                if let watts = connector.power?.advertisedWatts, connector.connectionActive != false { row("Charger maximum", "\(watts) W") }
+                if let revision = connector.cable?.pdRevision, connector.connectionActive == true { row("Cable PD revision", String(revision)) }
                 if let output = store.output(for: connector.id) {
-                    Label("Power out · supplied by Mac", systemImage: "arrow.up").font(.callout).foregroundStyle(MapPowerStyle.outgoing)
-                    fact("Current output", output.label)
-                    fact("Output voltage", String(format: "%.2f V", output.volts))
-                    fact("Output current", String(format: "%.2f A", output.amps))
-                    if let limit = output.configuredWatts { fact("Configured output limit", String(format: "%g W", limit)) }
-                    Text("Measured at the Mac port; this does not establish downstream device charging or a USB-PD contract.").font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("Output reading source") { Text(output.source).font(.caption).foregroundStyle(.secondary) }
+                    row("Output", String(format: "%.2f V · %.2f A", output.volts, output.amps))
+                    if let limit = output.configuredWatts { row("Output limit", String(format: "%g W", limit)) }
                 }
-                if let contract = connector.powerContractWatts, connector.connectionActive != false {
-                    fact("Negotiated power limit", "\(contract) W")
-                    if let mv = connector.power?.voltageMillivolts { fact("Negotiated voltage", String(format: "%.1f V", Double(mv) / 1000)) }
-                    if let ma = connector.power?.currentMilliamps { fact("Negotiated current limit", String(format: "%.2f A", Double(ma) / 1000)) }
-                }
-                if let cable = connector.cable, connector.connectionActive == true {
-                    fact("Cable", cable.productType)
-                    if let revision = cable.pdRevision { fact("Cable PD revision", String(revision)) }
-                }
-                if connector.id == store.powerRoute?.connectorID {
-                    Label("Power in (inferred)", systemImage: "arrow.down").font(.callout).foregroundStyle(MapPowerStyle.incoming)
-                }
-                ForEach(connector.links) { link in
-                    fact(link.label, link.detail ?? "Active")
-                }
+                ForEach(connector.links) { link in row(link.label.replacingOccurrences(of: " link active", with: " link"), link.detail ?? "Active") }
+                if !connector.laneDetails.isEmpty { row("Lanes", connector.laneDetails.joined(separator: "\n")) }
             }
-            if connectors.contains(where: { $0.id == store.powerRoute?.connectorID }) {
-                Button("Show current power input") { store.selection = .mac }.buttonStyle(.link)
-            }
-            DisclosureGroup("Port details") {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let socket {
-                        fact("Port support", socket.isMagSafe ? "MagSafe" : store.capabilityLabel(for: socket.port))
-                        fact("Position source", socket.isMagSafe ? "Detected MagSafe" : socket.isHDMI && !socket.hasSavedAssignment ? "Automatic HDMI position · adjustable in Settings" : "Port settings")
-                        if !socket.isMagSafe { fact("Support source", store.capabilitySource(for: socket.port)) }
-                    }
-                    ForEach(connectors) { connector in
-                        if let watts = connector.power?.advertisedWatts, connector.connectionActive != false { fact("Advertised power limit", "\(watts) W") }
-                        if !connector.laneDetails.isEmpty { fact("Reported PHY allocation", connector.laneDetails.joined(separator: "\n")) }
-                    }
-                    if let route = store.powerRoute, connectors.contains(where: { $0.id == route.connectorID }) { Text(route.label).font(.caption).foregroundStyle(.secondary) }
-                    Text("Connection speed describes the link, not measured data transfer. Power limits describe available power, not consumption.").font(.caption).foregroundStyle(.secondary)
-                }.padding(.top, 12)
-            }.font(.caption)
+            if let socket, !socket.isMagSafe { row("Support source", store.capabilitySource(for: socket.port)) }
         }
     }
-    @ViewBuilder private func deviceDetails(_ node: HardwareNode) -> some View {
+    private func powerFacts(_ connector: HardwareConnector) -> Bool {
+        connector.id == store.powerRoute?.connectorID || store.output(for: connector.id) != nil ||
+            (connector.powerContractWatts != nil && connector.connectionActive != false)
+    }
+
+    // MARK: Device, hub, branch or controller
+
+    @ViewBuilder private func nodeSections(_ node: HardwareNode) -> some View {
+        Section {
+            if node.kind == .device || node.kind == .hub {
+                if let speed = node.speed {
+                    row("Speed", speed.label).help("The connection's link rate, not measured transfer speed.")
+                }
+                if let manufacturer = node.manufacturer { row("Maker", manufacturer) }
+            }
+            connectedTo(node)
+            let children = store.snapshot.connectionChildren(of: node.id)
+            if !children.isEmpty { row("Devices behind it", "\(children.count)") }
+            if store.canPlaceComponent(node) {
+                Picker("Show on map", selection: Binding(get: { store.presentation.placement(for: node) }, set: { store.setPlacement($0, for: node) })) {
+                    Text("Automatically").tag(ComponentPlacement.automatic)
+                    Text("Inside the dock").tag(ComponentPlacement.grouped)
+                    Text("As its own device").tag(ComponentPlacement.separate)
+                }
+            }
+        }
         let volumes = store.snapshot.storage.filter { $0.deviceID == node.id }
         if !volumes.isEmpty {
-            group("Storage") {
-                ForEach(volumes) { StorageUsageView(volume: $0, compact: false) }
-                Text("Updated when connections refresh. APFS volumes may share capacity.").font(.caption).foregroundStyle(.secondary)
-            }
+            Section("Storage") { ForEach(volumes) { StorageUsageView(volume: $0, compact: false) } }
         }
-        let network = store.networkLinks.filter { $0.deviceID == node.id && Date().timeIntervalSince($0.sampledAt) <= 5 }
+        let network = store.networkLinks.filter { $0.deviceID == node.id && $0.isPhysicalPort && Date().timeIntervalSince($0.sampledAt) <= 5 }
         if !network.isEmpty {
-            group("Network") {
-                ForEach(network) { link in fact("Ethernet speed", link.label) }
-                Text("Network link speed is independent of the USB connection rate.").font(.caption).foregroundStyle(.secondary)
+            Section("Network") { ForEach(network) { link in row("Ethernet", link.label) } }
+        }
+        technicalDetails {
+            if store.mapTitle(for: node) != node.name { row("System name", node.name) }
+            if let vendor = node.vendorID { row("Vendor ID", String(format: "0x%04X", vendor)) }
+            if let product = node.productID { row("Product ID", String(format: "0x%04X", product)) }
+            if node.isUSB4Tunnel == true { row("Transport", "USB4 tunnel") }
+            ForEach(Array(node.power.enumerated()), id: \.offset) { _, value in row(value.label, "\(value.milliamps) mA") }
+            row("Path", store.snapshot.ancestry(of: node.id).map { store.mapTitle(for: $0) }.joined(separator: " › "))
+            row("Registry path", node.registryPath)
+        }
+    }
+    @ViewBuilder private func connectedTo(_ node: HardwareNode) -> some View {
+        if let parent = store.snapshot.connectionParent(of: node.id) {
+            LabeledContent("Connected through") {
+                Button(store.mapTitle(for: parent)) { store.selection = .device(parent.id) }.buttonStyle(.link)
+            }
+        } else if let port = store.physicalPort(for: node), node.kind != .controller {
+            LabeledContent("Plugged into") {
+                Button(port.name) { store.selection = .socket(port.id) }.buttonStyle(.link)
             }
         }
-        if !node.power.isEmpty {
-            group("Accessory power") {
-                ForEach(Array(node.power.enumerated()), id: \.offset) { _, value in fact(value.label, "\(value.milliamps) mA") }
-                Text("Reported allocation/supply; actual accessory consumption is unavailable.").font(.caption).foregroundStyle(.secondary)
-            }
+    }
+    private func nodeSummary(_ node: HardwareNode) -> String {
+        switch node.kind {
+        case .controller: return "USB host controller"
+        case .port: return node.transport ?? "USB branch"
+        case .hub, .device:
+            let kind = node.transport?.replacingOccurrences(of: " router", with: "") ?? node.deviceDescription
+            return node.speed.map { kind + " · " + $0.label } ?? kind
         }
-        DisclosureGroup("Advanced") {
-            VStack(alignment: .leading, spacing: 12) {
-                if let manufacturer = node.manufacturer { fact("Manufacturer", manufacturer) }
-                if store.mapTitle(for: node) != node.name { fact("System name", node.name) }
-                if let vendor = node.vendorID { fact("Vendor ID", String(format: "0x%04X", vendor)) }
-                if let product = node.productID { fact("Product ID", String(format: "0x%04X", product)) }
-                if let speed = node.speed { fact("Speed source", speed.source) }
-                if node.interfaceClasses?.contains(8) == true { fact("Live throughput", "Not measured") }
-                group("Reported path") {
-                    ForEach(store.snapshot.ancestry(of: node.id)) { ancestor in
-                        Button { store.selectedID = ancestor.id } label: { Label(ancestor.name, systemImage: ancestor.symbol) }.buttonStyle(.link)
+    }
+
+    // MARK: Display
+
+    @ViewBuilder private func displaySections(_ display: DisplayDevice) -> some View {
+        Section {
+            if let signal = display.signal {
+                row("Resolution", signal.resolution.label)
+                if let range = signal.variableRefreshRange { row("Refresh rate", "Variable · " + range.label) }
+                else { row("Refresh rate", String(format: "%g Hz", (signal.refreshRate * 100).rounded() / 100)) }
+            } else if let rate = display.refreshRate {
+                row("Refresh rate", String(format: "%g Hz", rate))
+            }
+            row("Looks like", "\(display.width) × \(display.height)")
+                .help("The desktop size macOS presents; the display receives the resolution above.")
+            if let node { connectedTo(node) }
+        }
+        technicalDetails {
+            if let native = display.nativeResolution { row("Native resolution", native.label) }
+            if let clock = display.signal?.pixelClockHz { row("Pixel clock", String(format: "%.2f MHz", clock / 1_000_000)) }
+            if let capacity = display.linkCapacity {
+                row("Link", "\(capacity.lanes) × " + String(format: "%g Gb/s", capacity.gigabitsPerLane) + " · " + capacity.payloadLabel + " usable")
+            }
+            if let edid = display.edid {
+                row("Manufacturer code", edid.manufacturer)
+                row("Product ID", String(format: "0x%04X", edid.product))
+                if let serial = edid.serialText ?? (edid.serial == 0 ? nil : String(edid.serial)) { row("Serial number", serial) }
+                row("Made in", String(edid.manufactureYear))
+                row("EDID version", edid.version)
+                Button("Copy EDID") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(edid.hex, forType: .string)
+                }
+            }
+            if !display.availableModes.isEmpty {
+                InspectorDisclosure("Available modes (\(display.availableModes.count))") {
+                    ForEach(display.availableModes) { mode in
+                        Text(mode.label).monospacedDigit().foregroundStyle(.secondary)
                     }
                 }
-                Text(node.registryPath).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
-                if store.attachmentHistory.laterAttachments.contains(node.id) { Text("Observed joining an established hub this session; enclosure membership is unknown.").font(.caption).foregroundStyle(.secondary) }
-            }.padding(.top, 12)
-        }.font(.caption)
+            }
+        }
     }
-    private func fact(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(label).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-            Text(value).multilineTextAlignment(.trailing).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .trailing)
-        }.font(.callout).fixedSize(horizontal: false, vertical: true)
+
+    // MARK: Building blocks
+
+    private func isActive(_ socket: SocketConnection) -> Bool {
+        !socket.devices.isEmpty || socket.connectors.contains { $0.connectionActive == true || !$0.links.isEmpty }
     }
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.subheadline.weight(.semibold))
-            content()
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+    private func portName(for connectorID: String) -> String {
+        store.physicalTopology.sockets.first { $0.connectors.contains { $0.id == connectorID } }?.port.name
+            ?? store.snapshot.connectors.first { $0.id == connectorID }?.label ?? "Unknown port"
+    }
+    private func row(_ label: String, _ value: String) -> some View {
+        LabeledContent(label) {
+            Text(value).multilineTextAlignment(.trailing).textSelection(.enabled)
+        }
+    }
+    /// Everything technical, collapsed by default, with no explanatory text.
+    private func technicalDetails<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        let rows = content()
+        return Section {
+            InspectorDisclosure("Technical Details") {
+                rows.font(.callout).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -341,5 +331,16 @@ private struct PowerGraph: View {
             }.background(.green.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
             Text("Last 60 seconds · peak " + String(format: "%.1f W", samples.compactMap { $0.liveInput(at: $0.sampledAt)?.value }.max() ?? 0)).font(.caption2).foregroundStyle(.secondary)
         }.accessibilityElement(children: .ignore).accessibilityLabel("Mac input power over the last sixty seconds")
+    }
+}
+
+/// An expandable inspector row. Detail text inside may be small, but the row title always
+/// uses the standard body font so every row in the form lines up.
+private struct InspectorDisclosure<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+    init(_ title: String, @ViewBuilder content: @escaping () -> Content) { self.title = title; self.content = content }
+    var body: some View {
+        DisclosureGroup { content() } label: { Text(title).font(.body).foregroundStyle(.primary) }
     }
 }

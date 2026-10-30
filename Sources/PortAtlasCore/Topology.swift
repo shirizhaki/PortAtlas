@@ -114,6 +114,40 @@ public struct HardwareNode: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+extension HardwareNode {
+    /// The same node under a different parent.
+    func reparented(to parentID: String?) -> HardwareNode {
+        HardwareNode(id: id, name: name, kind: kind, parentID: parentID, registryPath: registryPath, manufacturer: manufacturer,
+                     vendorID: vendorID, productID: productID, locationID: locationID, speed: speed, power: power,
+                     portNumber: portNumber, connectorPath: connectorPath, interfaceClasses: interfaceClasses,
+                     isUSB4Tunnel: isUSB4Tunnel, transport: transport, displayID: displayID)
+    }
+}
+
+/// A Thunderbolt / USB4 accessory's router is reported with only the Mac's internal host
+/// router above it, so on its own it would start a separate tree. Each such router is placed
+/// under a Thunderbolt branch of the Mac connector it is plugged into, beside that connector's
+/// USB 2 and USB 3 branches and under the same controller.
+public enum ThunderboltBranches {
+    public static let transport = "Thunderbolt / USB4 branch"
+    public static func attach(_ nodes: [HardwareNode]) -> [HardwareNode] {
+        let ids = Set(nodes.map(\.id))
+        var branches: [String: HardwareNode] = [:]
+        let attached = nodes.map { node -> HardwareNode in
+            guard node.kind == .hub, node.transport != nil, let path = node.connectorPath,
+                  node.parentID.map({ !ids.contains($0) }) ?? true,
+                  let controller = nodes.first(where: { $0.kind == .port && $0.connectorPath == path && $0.parentID != nil })?.parentID
+            else { return node }
+            let branch = branches[path] ?? HardwareNode(id: "thunderbolt-branch:" + path, name: "Thunderbolt / USB4 branch",
+                kind: .port, parentID: controller, connectorPath: path, transport: transport)
+            branches[path] = branch
+            return node.reparented(to: branch.id)
+        }
+        // Appended after the USB branches, which carry the registry paths saved for port assignments.
+        return attached + branches.values.sorted { $0.id < $1.id }
+    }
+}
+
 public struct TopologySnapshot: Sendable {
     public let nodes: [HardwareNode]
     public let capturedAt: Date
@@ -123,15 +157,19 @@ public struct TopologySnapshot: Sendable {
     public let powerStatus: MacPowerStatus
     public let thunderboltDevices: [ThunderboltDevice]
     public let formFactor: MacFormFactor
+    public let product: MacProduct
+    /// The marketing name macOS reports, such as "MacBook Air (13-inch, M2, 2022)".
+    public let productName: String?
     public let storage: [StorageVolume]
     /// Lookup indices built once; the map queries ancestry and children on every frame.
     private let nodeIndex: [String: Int]
     private let childIndex: [String: [HardwareNode]]
     public let roots: [HardwareNode]
-    public init(nodes: [HardwareNode], modelIdentifier: String, notices: [String] = [], capturedAt: Date = Date(), connectors: [HardwareConnector] = [], storage: [StorageVolume] = [], formFactor: MacFormFactor = .laptop, powerStatus: MacPowerStatus = MacPowerStatus(), thunderboltDevices: [ThunderboltDevice] = []) {
+    public init(nodes: [HardwareNode], modelIdentifier: String, notices: [String] = [], capturedAt: Date = Date(), connectors: [HardwareConnector] = [], storage: [StorageVolume] = [], formFactor: MacFormFactor = .laptop, powerStatus: MacPowerStatus = MacPowerStatus(), thunderboltDevices: [ThunderboltDevice] = [], product: MacProduct? = nil, productName: String? = nil) {
         self.nodes = nodes; self.modelIdentifier = modelIdentifier
         self.notices = notices; self.capturedAt = capturedAt
         self.connectors = connectors; self.storage = storage; self.formFactor = formFactor
+        self.product = product ?? (formFactor == .laptop ? .macBook : .desktop); self.productName = productName
         self.powerStatus = powerStatus; self.thunderboltDevices = thunderboltDevices
         // The first node wins for a duplicate ID, matching the previous linear search.
         var index: [String: Int] = [:]

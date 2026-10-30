@@ -26,8 +26,11 @@ struct PhysicalMapView: View {
 private struct PhysicalMapContent: View {
     @EnvironmentObject private var store: AtlasStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(\.mapScale) private var scale
-    private var motionDisabled: Bool { reduceMotion || !store.animateConnections || store.activeMapKind != .physical }
+    /// Wires animate only while this window is active: the whole map redraws per frame,
+    /// so a background window stays still and idle.
+    private var motionDisabled: Bool { reduceMotion || !store.animateConnections || store.activeMapKind != .physical || !appearsActive }
     private var hasLiveConnections: Bool { projection.sockets.contains { !$0.devices.isEmpty || $0.connectors.contains { $0.connectionActive == true } } }
     private var projection: PhysicalTopology { store.physicalTopology }
     private func sockets(on side: PortSide) -> [SocketConnection] { projection.sockets.filter { $0.port.side == side } }
@@ -43,29 +46,19 @@ private struct PhysicalMapContent: View {
                     column(.left).frame(width: columnWidth(.left) * scale)
                     VStack(spacing: 18 * scale) {
                         Button { store.selection = .mac } label: {
-                            MacIllustration(form: store.snapshot.formFactor).frame(width: 280 * scale, height: 250 * scale)
+                            MacArtwork(product: store.macProduct).frame(width: MacArtworkGeometry.size.width * scale, height: MacArtworkGeometry.size.height * scale)
                         }.buttonStyle(.plain).help("Show Mac details and power readings")
                             .anchorPreference(key: FocusAnchors.self, value: .bounds) { ["mac": $0] }
                             .anchorPreference(key: SocketAnchors.self, value: .bounds) { ["mac": $0] }
-                        Text("This Mac").font(.system(size: 14 * max(0.85, scale), weight: .medium))
-
-                        Label("Front", systemImage: "arrow.down").font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.tertiary)
-                        if store.snapshot.formFactor == .laptop {
-                            Label(store.powerSample.chargingLabel, systemImage: store.powerStatus.externalPower == true ? "battery.100percent.bolt" : "battery.75percent")
-                                .font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
-                            if let input = store.liveInput {
-                                Text(input.label + " input").font(.system(size: 13 * max(0.85, scale), weight: .medium)).monospacedDigit().foregroundStyle(MapPowerStyle.incoming)
+                        // Name, orientation and one status line; live readings live in the toolbar and inspector.
+                        VStack(spacing: 4 * scale) {
+                            Text("This Mac").font(.system(size: 13 * scale, weight: .semibold))
+                            if store.snapshot.formFactor == .laptop {
+                                Text(store.powerSample.batteryPercent.map { "\(store.powerSample.chargingLabel) · \($0)%" } ?? store.powerSample.chargingLabel)
+                                    .font(.system(size: 11 * scale)).monospacedDigit().foregroundStyle(.secondary)
                             }
-                            if let percent = store.powerSample.batteryPercent {
-                                Text("Battery · \(percent)%").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
-                            }
-                        }
-                        if let output = store.totalOutput {
-                            Text(String(format: "%.1f W total output", output))
-                                .font(.system(size: 13 * max(0.85, scale), weight: .medium)).monospacedDigit().foregroundStyle(MapPowerStyle.outgoing)
-                                .help("Sum of available measurements at Mac USB-C ports. Unreported ports are not included.")
-                        } else {
-                            Text("Output not reported").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                            Label("Front", systemImage: "arrow.down").font(.system(size: 10 * scale)).foregroundStyle(.tertiary)
+                                .padding(.top, 6 * scale)
                         }
                     }.padding(.top, 64 * scale)
                     column(.right).frame(width: columnWidth(.right) * scale).padding(.top, 64 * scale)
@@ -74,7 +67,7 @@ private struct PhysicalMapContent: View {
             }.backgroundPreferenceValue(SocketAnchors.self) { anchors in
                 GeometryReader { proxy in
                     ZStack {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: motionDisabled || !hasLiveConnections)) { timeline in
+                    TimelineView(.animation(minimumInterval: 1.0 / 20, paused: motionDisabled || !hasLiveConnections)) { timeline in
                     Canvas { context, _ in
                         let phase = motionDisabled ? 0 : timeline.date.timeIntervalSinceReferenceDate
                         guard let anchor = anchors["mac"] else { return }
@@ -116,31 +109,22 @@ private struct PhysicalMapContent: View {
                         for socket in projection.sockets {
                             guard anchors[socket.id.uuidString] != nil else { continue }
                             let point = socketPoint(socket, mac: proxy[macAnchor])
-                            let horizontal = socket.port.side == .left || socket.port.side == .right
-                            let length: CGFloat = socket.isMagSafe || socket.isHDMI || socket.isUSBA ? 12 : 9
-                            let size = CGSize(width: (horizontal ? 3 : length) * scale, height: (horizontal ? length : 3) * scale)
-                            let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
-                            let slot = Path(roundedRect: rect, cornerRadius: 1.2 * scale)
-                            let look = appearance(for: socket)
-                            var slotContext = context; slotContext.opacity = store.emphasis(for: socket)
-                            slotContext.fill(slot, with: .color(.secondary.opacity(0.25)))
-                            slotContext.stroke(slot, with: .color(.secondary.opacity(0.45)), lineWidth: 0.6 * scale)
-                            if look.active {
-                                CablePlugDrawing.draw(at: point, side: socket.port.side, magSafe: socket.isMagSafe, hdmi: socket.isHDMI, usbA: socket.isUSBA, scale: scale, context: &slotContext)
-                            }
+                            var portContext = context; portContext.opacity = store.emphasis(for: socket)
+                            PortDrawing.draw(portKind(socket), at: point, side: socket.port.side, plugged: appearance(for: socket).active,
+                                             led: magSafeLight(socket), scale: scale, context: &portContext)
                         }
                     }.allowsHitTesting(false)
                 }
             }
             if !projection.unplaced.isEmpty {
                 VStack(alignment: .leading, spacing: 16 * scale) {
-                    Text("Unmapped ports").font(.system(size: 16 * max(0.85, scale), weight: .semibold))
-                    Text("Assign physical positions in Settings.").font(.system(size: 12 * max(0.85, scale))).foregroundStyle(.secondary)
+                    Text("Needs a Position").font(.system(size: 16 * scale, weight: .semibold))
+                    Text("Use Match Ports to place these.").font(.system(size: 12 * scale)).foregroundStyle(.secondary)
                     ForEach(projection.unplaced) { connection in
                         VStack(alignment: .leading, spacing: 14 * scale) {
                             Button { if let id = connection.connector?.id { store.selection = .connector(id) } } label: {
                                 HStack {
-                                    Label(connection.connector?.label ?? "USB connection", systemImage: "cable.connector").font(.system(size: 13 * max(0.85, scale)))
+                                    Label(connection.connector?.label ?? "USB connection", systemImage: "cable.connector").font(.system(size: 13 * scale))
                                     Spacer(minLength: 0)
                                     MapFunctionIcons(appearance: MapConnectionAppearance(active: !connection.devices.isEmpty || connection.connector?.connectionActive == true,
                                         display: connection.connector?.links.contains { $0.isDisplay } == true,
@@ -153,7 +137,7 @@ private struct PhysicalMapContent: View {
 
                             if let connector = connection.connector, let route = store.powerRoute, route.connectorID == connector.id {
                                 MapPowerBadge(scale: scale)
-                                Text(store.powerStatus.label).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                                Text(store.powerStatus.label).font(.system(size: 11 * scale)).foregroundStyle(.secondary)
 
                             }
                             if let connector = connection.connector, let output = store.output(for: connector.id) {
@@ -161,7 +145,7 @@ private struct PhysicalMapContent: View {
                             }
                             AttachmentView(roots: connection.devices)
                             ForEach(connection.connector?.links ?? []) { link in
-                                Label(link.label, systemImage: link.symbol).font(.system(size: 12 * max(0.85, scale))).foregroundStyle(MapPalette.data)
+                                Label(link.label, systemImage: link.symbol).font(.system(size: 12 * scale)).foregroundStyle(MapPalette.data)
                             }
                         }.padding(18 * scale).frame(maxWidth: .infinity, alignment: .leading)
                             .modifier(MapCardSurface(scale: scale, appearance: MapConnectionAppearance(active: !connection.devices.isEmpty || connection.connector?.connectionActive == true, display: connection.connector?.links.contains { $0.isDisplay } == true,
@@ -180,14 +164,16 @@ private struct PhysicalMapContent: View {
     private func socketPoint(_ socket: SocketConnection, mac: CGRect) -> CGPoint {
         let ordered = sockets(on: socket.port.side).filter { !$0.isMagSafe }
         let index = ordered.firstIndex { $0.id == socket.id } ?? 0
-        let unit = min(mac.width / 280, mac.height / 250)
-        let origin = CGPoint(x: mac.minX + (mac.width - 280 * unit) / 2, y: mac.minY + (mac.height - 250 * unit) / 2)
-        let point = MacDrawingGeometry.socket(form: store.snapshot.formFactor, side: socket.port.side, index: index, count: ordered.count, magSafe: socket.isMagSafe)
+        let design = MacArtworkGeometry.size
+        let unit = min(mac.width / design.width, mac.height / design.height)
+        let origin = CGPoint(x: mac.minX + (mac.width - design.width * unit) / 2, y: mac.minY + (mac.height - design.height * unit) / 2)
+        let point = MacArtworkGeometry.socket(product: store.macProduct, side: socket.port.side, index: index, count: ordered.count, magSafe: socket.isMagSafe)
         return CGPoint(x: origin.x + point.x * unit, y: origin.y + point.y * unit)
     }
     private func socketEndpoints(_ socket: SocketConnection, mac: CGRect, card: CGRect) -> (CGPoint, CGPoint) {
         let point = socketPoint(socket, mac: mac)
-        let distance = appearance(for: socket).active ? (socket.isMagSafe ? 9.0 : 12.0) * scale : 0
+        // A connected cable leaves from the end of its plug.
+        let distance = appearance(for: socket).active ? PortDrawing.plugLength(portKind(socket)) * scale : 0
         let vector = socket.port.side == .left ? CGPoint(x: -1, y: 0) : socket.port.side == .right ? CGPoint(x: 1, y: 0) : socket.port.side == .back ? CGPoint(x: 0, y: -1) : CGPoint(x: 0, y: 1)
         let a = CGPoint(x: point.x + vector.x * distance, y: point.y + vector.y * distance)
         let b: CGPoint
@@ -204,6 +190,14 @@ private struct PhysicalMapContent: View {
         return (a, b)
     }
     private func appearance(for socket: SocketConnection) -> MapConnectionAppearance { store.socketAppearance(socket) }
+    private func portKind(_ socket: SocketConnection) -> PortDrawing.Kind {
+        socket.isMagSafe ? .magSafe : socket.isHDMI ? .hdmi : socket.isUSBA ? .usbA : .usbC
+    }
+    /// MagSafe's light: amber while the battery charges, green otherwise, as on the real plug.
+    private func magSafeLight(_ socket: SocketConnection) -> Color? {
+        guard socket.isMagSafe, store.receivesPower(socket) else { return nil }
+        return store.powerStatus.isCharging == true ? Color(nsColor: .systemOrange) : Color(nsColor: .systemGreen)
+    }
     private func curve(_ a: CGPoint, _ b: CGPoint, horizontal: Bool) -> Path {
         var path = Path(); path.move(to: a)
         path.addCurve(to: b, control1: horizontal ? CGPoint(x: (a.x + b.x) / 2, y: a.y) : CGPoint(x: a.x, y: (a.y + b.y) / 2),
@@ -214,39 +208,39 @@ private struct PhysicalMapContent: View {
     @ViewBuilder private var systemConnections: some View {
         if !store.unassignedDisplays.isEmpty || !store.snapshot.thunderboltDevices.isEmpty || (store.powerStatus.externalPower == true && !hasPortPowerContract) {
             VStack(alignment: .leading, spacing: 16 * scale) {
-                Text("Unmapped connections").font(.system(size: 14 * max(0.85, scale), weight: .semibold))
-                Text("Physical routes are unavailable for these connections.")
-                    .font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                Text("Needs a Position").font(.system(size: 14 * scale, weight: .semibold))
+                Text("The port for these connections isn't known.")
+                    .font(.system(size: 11 * scale)).foregroundStyle(.secondary)
                 if store.powerStatus.externalPower == true && !hasPortPowerContract {
                     HStack(spacing: 12 * scale) {
-                        Image(systemName: "powerplug").font(.system(size: 22 * max(0.85, scale))).foregroundStyle(MapPalette.data)
+                        Image(systemName: "powerplug").font(.system(size: 22 * scale)).foregroundStyle(MapPalette.Graphic.data)
                         VStack(alignment: .leading, spacing: 5 * scale) {
-                            Text(store.powerStatus.label).font(.system(size: 13 * max(0.85, scale), weight: .medium))
+                            Text(store.powerStatus.label).font(.system(size: 13 * scale, weight: .medium))
                             if let watts = store.powerStatus.adapterWatts {
-                                Text("\(watts) W adapter rating").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                                Text("\(watts) W adapter rating").font(.system(size: 11 * scale)).foregroundStyle(.secondary)
                             }
-                            Text("Input port unknown").font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.secondary)
+                            Text("Input port unknown").font(.system(size: 10 * scale)).foregroundStyle(.secondary)
                         }
                     }
                 }
                 ForEach(store.unassignedDisplays) { display in
                     HStack(spacing: 12 * scale) {
-                        Image(systemName: "display").font(.system(size: 22 * max(0.85, scale))).foregroundStyle(MapPalette.display)
+                        Image(systemName: "display").font(.system(size: 22 * scale)).foregroundStyle(MapPalette.Graphic.display)
                         VStack(alignment: .leading, spacing: 5 * scale) {
-                            Button(display.name) { store.selection = .display(display.id) }.buttonStyle(.plain).font(.system(size: 13 * max(0.85, scale), weight: .medium))
-                            Text(display.mapLabel + " · port unknown").font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.secondary)
+                            Button(display.name) { store.selection = .display(display.id) }.buttonStyle(.plain).font(.system(size: 13 * scale, weight: .medium))
+                            Text(display.mapLabel + " · port unknown").font(.system(size: 10 * scale)).foregroundStyle(.secondary)
                         }
                     }.anchorPreference(key: FocusAnchors.self, value: .bounds) { ["display-\(display.id)": $0] }
                 }
                 ForEach(store.snapshot.thunderboltDevices) { device in
                     HStack(spacing: 12 * scale) {
-                        Image(systemName: "bolt.horizontal").font(.system(size: 22 * max(0.85, scale))).foregroundStyle(MapPalette.data)
+                        Image(systemName: "bolt.horizontal").font(.system(size: 22 * scale)).foregroundStyle(MapPalette.Graphic.data)
                         VStack(alignment: .leading, spacing: 5 * scale) {
-                            Text(device.name).font(.system(size: 13 * max(0.85, scale), weight: .medium))
+                            Text(device.name).font(.system(size: 13 * scale, weight: .medium))
                             if let parent = store.snapshot.thunderboltDevices.first(where: { $0.id == device.parentID }) {
-                                Text("Via " + parent.name).font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.secondary)
+                                Text("Via " + parent.name).font(.system(size: 10 * scale)).foregroundStyle(.secondary)
                             }
-                            Text("Thunderbolt / USB4 · port unknown").font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.secondary)
+                            Text("Thunderbolt / USB4 · port unknown").font(.system(size: 10 * scale)).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -262,7 +256,7 @@ private struct PhysicalMapContent: View {
     @ViewBuilder private func panel(_ side: PortSide) -> some View {
         if !sockets(on: side).isEmpty {
             VStack(alignment: .leading, spacing: 12 * scale) {
-                Text(side.label + " panel · left to right").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                Text(side.label + " panel · left to right").font(.system(size: 11 * scale)).foregroundStyle(.secondary)
                 HStack(alignment: .top, spacing: 24 * scale) { ForEach(sockets(on: side)) { socketCard($0).frame(width: verticalWidth($0) * scale) } }
             }
         }
@@ -285,7 +279,7 @@ private struct PhysicalMapContent: View {
     private func verticalWidth(_ socket: SocketConnection) -> CGFloat {
         let nodes = downstreamDevices(socket), ids = Set(nodes.map(\.id))
         let counts = Dictionary(grouping: nodes, by: { depth($0, among: ids) }).values.map(\.count)
-        return max(338, CGFloat(counts.max() ?? 0) * 324 - 24)
+        return max(MapMetrics.card + 38, CGFloat(counts.max() ?? 0) * (MapMetrics.card + 24) - 24)
     }
     private func panelWidth(_ side: PortSide) -> CGFloat {
         let ports = sockets(on: side)
@@ -296,7 +290,7 @@ private struct PhysicalMapContent: View {
             let nodes = downstreamDevices(socket), ids = Set(nodes.map(\.id))
             return nodes.map { depth($0, among: ids) }.max() ?? 0
         }.max() ?? 0
-        return 338 + CGFloat(levels) * 348
+        return MapMetrics.card + 38 + CGFloat(levels) * (MapMetrics.card + 48)
     }
     private func socketCard(_ socket: SocketConnection) -> some View {
         let devices = downstreamDevices(socket)
@@ -321,7 +315,7 @@ private struct PhysicalMapContent: View {
         }.backgroundPreferenceValue(DeviceAnchors.self) { anchors in
             GeometryReader { proxy in
                 ZStack {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: motionDisabled || devices.isEmpty)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: motionDisabled || devices.isEmpty)) { timeline in
                 Canvas { context, _ in
                     let phase = motionDisabled ? 0 : timeline.date.timeIntervalSinceReferenceDate
                     for node in devices {
@@ -372,31 +366,28 @@ private struct PhysicalMapContent: View {
             Button { store.selection = .socket(socket.id) } label: {
                 HStack(spacing: 8 * scale) {
                     Image(systemName: socket.isMagSafe ? "powerplug" : socket.isHDMI ? "display" : "cable.connector").foregroundStyle(.secondary)
-                    Text(socket.port.name).font(.system(size: 12 * max(0.85, scale), weight: .semibold))
+                    Text(socket.port.name).font(.system(size: 12 * scale, weight: .semibold))
                     Spacer(minLength: 0)
                     MapFunctionIcons(appearance: appearance(for: socket), scale: scale)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help("Show port details")
             if active {
                 if !socket.devices.isEmpty { AttachmentView(roots: socket.devices, separatedIDs: separatedIDs) }
-                else if !socket.isMagSafe {
-                    Text(store.connectionLabel(for: socket)).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                // One status line per card: a charger shows only its live power; details are in the inspector.
+                else if !socket.isMagSafe && !store.receivesPower(socket) {
+                    Text(store.connectionLabel(for: socket)).font(.system(size: 11 * scale)).foregroundStyle(.secondary)
                 }
                 if store.receivesPower(socket) {
-                    MapPowerBadge(scale: scale)
-                    Text(store.powerSample.chargingLabel).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                    MapPowerBadge(detail: store.liveInput?.label, scale: scale)
                 }
                 if let output = store.output(for: socket) {
                     MapPowerBadge(outgoing: true, detail: output.label, scale: scale)
                 }
-                if socket.isMagSafe || socket.devices.isEmpty, let watts = socket.connectors.filter({ $0.connectionActive != false }).compactMap(\.powerContractWatts).first {
-                    Text("Power limit · \(watts) W").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
-                }
             } else if socket.connectors.isEmpty || socket.connectors.contains(where: { $0.connectionActive == nil }) {
-                Text(socket.status).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                Text(socket.status).font(.system(size: 11 * scale)).foregroundStyle(.secondary)
             }
-        }.padding((active ? 16 + CGFloat(max(0, appearance(for: socket).colors.count - 1)) * 4 : 10) * scale)
-            .frame(width: (active ? 300 : 155) * scale, alignment: .leading)
+        }.padding((active ? 14 : 10) * scale)
+            .frame(width: (active ? MapMetrics.card : 140) * scale, alignment: .leading)
             .modifier(MapCardSurface(selected: store.selection == .socket(socket.id), subdued: !active, scale: scale, appearance: appearance(for: socket), emphasized: store.emphasis(for: socket) == 1, select: { store.selection = .socket(socket.id) }))
 
             .anchorPreference(key: SocketAnchors.self, value: .bounds) { [socket.id.uuidString: $0] }
@@ -413,13 +404,12 @@ private struct PhysicalMapContent: View {
                         MapFunctionIcons(appearance: store.deviceAppearance(node), scale: scale)
                     }
                     DeviceBranch(node: node, visited: [], separatedIDs: separatedIDs)
-                }.padding(18 * scale).frame(width: 300 * scale, alignment: .leading)
+                }.padding(14 * scale).frame(width: MapMetrics.card * scale, alignment: .leading)
                     .modifier(MapCardSurface(selected: store.selection == .device(node.id) || store.selection == .connection(node.id), scale: scale,
                         appearance: store.deviceAppearance(node), emphasized: store.emphasis(for: node.id) == 1, select: { store.selection = .device(node.id) }))
                     .anchorPreference(key: DeviceAnchors.self, value: .bounds) { [node.id: $0] }
             .anchorPreference(key: FocusAnchors.self, value: .bounds) { [node.id: $0] }
 
-                    .help(node.displayID != nil ? "Display identity matched to the active DisplayPort transport. Route passes through this dock; further display adapters may not be enumerated." : store.attachmentHistory.laterAttachments.contains(node.id) ? "Observed joining an already connected hub during this session. Physical enclosure membership is not verified." : "Device connected downstream of the reported hub. Folded intermediate components remain available in Other components and Logical.")
     }
 
 }
@@ -433,7 +423,7 @@ private struct AttachmentView: View {
         if roots.count > 1 {
             VStack(alignment: .leading, spacing: 16 * scale) {
                 Label("USB branches", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 15 * max(0.85, scale), weight: .semibold)).foregroundStyle(MapPalette.data)
+                    .font(.system(size: 11 * scale, weight: .medium)).foregroundStyle(.secondary)
 
                 ForEach(roots.sorted { ($0.speed?.megabitsPerSecond ?? 0) > ($1.speed?.megabitsPerSecond ?? 0) }) {
                     DeviceBranch(node: $0, visited: [], separatedIDs: separatedIDs)
@@ -456,11 +446,18 @@ struct StorageUsageView: View {
                 Text(volume.name).lineLimit(1)
                 Spacer()
                 Text("\(Int(volume.usedFraction * 100))% used").monospacedDigit()
-            }.font(.system(size: 10 * max(0.85, scale))).foregroundStyle(.secondary)
-            ProgressView(value: volume.usedFraction).tint(MapPalette.data)
-            if !compact || scale >= 0.8 {
+            }.font(.system(size: 10 * scale)).foregroundStyle(.secondary)
+            // Drawn in SwiftUI: the map renders through drawingGroup, which cannot host AppKit controls.
+            Capsule().fill(Color.primary.opacity(0.08))
+                .overlay(alignment: .leading) {
+                    GeometryReader { proxy in
+                        Capsule().fill(MapPalette.Graphic.data).frame(width: max(proxy.size.height, proxy.size.width * volume.usedFraction))
+                    }
+                }
+                .frame(height: 5 * scale)
+            if !compact {
                 Text(compact ? "\(bytes(volume.availableBytes)) free" : "\(bytes(volume.usedBytes)) used of \(bytes(volume.totalBytes)) · \(bytes(volume.availableBytes)) free")
-                    .font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
+                    .font(.system(size: 11 * scale)).foregroundStyle(.secondary)
             }
         }.accessibilityElement(children: .combine)
     }
@@ -479,24 +476,22 @@ private struct DeviceBranch: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14 * scale) {
+        VStack(alignment: .leading, spacing: 10 * scale) {
             HStack(spacing: 8 * scale) {
                 Button { store.selectedID = node.id } label: {
-                    HStack(alignment: .center, spacing: 12 * scale) {
-                        if scale >= 0.6 {
-                        Image(systemName: combined == nil ? node.symbol : "externaldrive").font(.system(size: 25 * max(0.85, scale), weight: .light)).foregroundStyle(node.displayID != nil ? MapPalette.display : MapPalette.data)
-                            .frame(width: 42 * scale, height: 48 * scale).background(MapPalette.data.opacity(0.07), in: RoundedRectangle(cornerRadius: 10 * scale))
-                        }
-                        VStack(alignment: .leading, spacing: 5 * scale) {
-                            Text(combined?.name ?? node.name).font(.system(size: 15 * max(0.85, scale), weight: .semibold)).lineLimit(scale >= 0.65 ? 2 : 1)
-                            if scale >= 0.65 {
-                                Text(node.isUSB4Tunnel == true ? "USB4 tunnel" : node.deviceDescription).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
-                            }
+                    HStack(alignment: .center, spacing: 10 * scale) {
+                        // A role-tinted tile, like the system's tinted icon tiles, carries the connection role.
+                        let role = node.displayID != nil ? MapPalette.Graphic.display : MapPalette.Graphic.data
+                        Image(systemName: combined == nil ? node.symbol : "externaldrive").font(.system(size: 17 * scale, weight: .regular)).foregroundStyle(role)
+                            .frame(width: 32 * scale, height: 32 * scale).background(role.opacity(0.14), in: RoundedRectangle(cornerRadius: 8 * scale, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2 * scale) {
+                            Text(combined?.name ?? node.name).font(.system(size: 13 * scale, weight: .semibold)).lineLimit(2)
+                            Text(node.displayID != nil ? "Display" : node.isUSB4Tunnel == true ? "USB4 tunnel" : node.deviceDescription).font(.system(size: 11 * scale)).foregroundStyle(.secondary)
 
                             if let displayID = node.displayID {
-                                Text(store.displayLabel(displayID) ?? "Display connected").font(.system(size: 11 * max(0.85, scale))).foregroundStyle(MapPalette.display)
+                                Text(store.displayLabel(displayID) ?? "Display connected").font(.system(size: 11 * scale, weight: .medium)).foregroundStyle(.secondary)
                             } else {
-                                Text(node.speed?.label ?? "Speed unavailable").lineLimit(1).font(.system(size: 12 * max(0.85, scale), weight: .medium, design: .monospaced)).foregroundStyle(MapPalette.data)
+                                Text(node.speed?.label ?? "Speed unavailable").lineLimit(1).font(.system(size: 11 * scale, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
                             }
                         }
                         Spacer(minLength: 0)
@@ -506,7 +501,7 @@ private struct DeviceBranch: View {
                     Button {
                         if store.collapsed.contains(node.id) { store.collapsed.remove(node.id) }
                         else { store.collapsed.insert(node.id) }
-                    } label: { Image(systemName: store.collapsed.contains(node.id) ? "chevron.right" : "chevron.down").font(.system(size: 12 * max(0.85, scale))) }
+                    } label: { Image(systemName: store.collapsed.contains(node.id) ? "chevron.right" : "chevron.down").font(.system(size: 12 * scale)) }
                         .buttonStyle(.plain).help("Expand or collapse hub")
                 }
             }
@@ -514,28 +509,26 @@ private struct DeviceBranch: View {
             .anchorPreference(key: FocusAnchors.self, value: .bounds) { [node.id: $0] }
             if let combined {
                 Button("Drive details") { store.selectedID = combined.id }
-                    .buttonStyle(.plain).font(.system(size: 10 * max(0.85, scale))).foregroundStyle(MapPalette.data)
+                    .buttonStyle(.plain).foregroundStyle(Color.accentColor).font(.system(size: 11 * scale))
 
             }
-            if scale >= 0.55 {
-                ForEach(store.snapshot.storage.filter { $0.deviceID == (combined?.id ?? node.id) }) { StorageUsageView(volume: $0) }
-            }
+            ForEach(store.snapshot.storage.filter { $0.deviceID == (combined?.id ?? node.id) }) { StorageUsageView(volume: $0) }
             let additional = children.filter { !separatedIDs.contains($0.id) }
-            if scale >= 0.6 && !store.collapsed.contains(node.id) && !additional.isEmpty {
+            if !store.collapsed.contains(node.id) && !additional.isEmpty {
                 Button {
                     if store.expandedComponents.contains(node.id) { store.expandedComponents.remove(node.id) }
                     else { store.expandedComponents.insert(node.id) }
                 } label: {
                     Label("Other components (\(additional.count))", systemImage: store.expandedComponents.contains(node.id) ? "chevron.down" : "chevron.right")
-                }.buttonStyle(.plain).font(.system(size: 11 * max(0.85, scale))).foregroundStyle(.secondary)
-                    .help("Presentation grouping only; these components are not necessarily built into the hub. Right-click a component or use its inspector to choose physical placement.")
+                }.buttonStyle(.plain).font(.system(size: 11 * scale)).foregroundStyle(.secondary)
+                    .help("Right-click a component to show it as its own device")
                 if store.expandedComponents.contains(node.id) {
                     VStack(alignment: .leading, spacing: 14 * scale) {
                         ForEach(additional) { child in
                             AnyView(DeviceBranch(node: child, visited: visited.union([node.id]), separatedIDs: separatedIDs))
                         }
                     }.padding(.leading, 14 * scale).overlay(alignment: .leading) {
-                        Rectangle().fill(MapPalette.data.opacity(0.18)).frame(width: scale)
+                        Rectangle().fill(MapPalette.Graphic.data.opacity(0.3)).frame(width: scale)
                     }
                 }
             }
@@ -551,158 +544,40 @@ private struct DeviceBranch: View {
     }
 }
 
-/// Canvas geometry and socket endpoints share one coordinate system.
-private enum MacDrawingGeometry {
-    static func chassis(_ form: MacFormFactor) -> CGRect {
-        form == .laptop ? CGRect(x: 7, y: 42, width: 266, height: 199) : CGRect(x: 22, y: 10, width: 236, height: 230)
-    }
-    static func socket(form: MacFormFactor, side: PortSide, index: Int, count: Int, magSafe: Bool) -> CGPoint {
-        let body = chassis(form)
-        let fraction = CGFloat(index + 1) / CGFloat(max(1, count) + 1)
-        let sideY: CGFloat
-        if form == .laptop {
-            let spacing = min(24, (body.height * 0.48 - 38) / CGFloat(max(1, count - 1)))
-            sideY = body.minY + (magSafe ? 18 : 38 + CGFloat(index) * spacing)
-        } else { sideY = body.minY + 20 + fraction * (body.height - 40) }
-        let panelX = body.minX + 20 + fraction * (body.width - 40)
-        switch side {
-        case .left: return CGPoint(x: body.minX, y: sideY)
-        case .right: return CGPoint(x: body.maxX, y: sideY)
-        case .back: return CGPoint(x: panelX, y: body.minY)
-        case .front: return CGPoint(x: panelX, y: body.maxY)
-        }
-    }
-}
-
-private struct MacIllustration: View {
-    let form: MacFormFactor
-    @Environment(\.colorScheme) private var colorScheme
-    var body: some View {
-        Canvas { context, size in
-            let unit = min(size.width / 280, size.height / 250)
-            context.translateBy(x: (size.width - 280 * unit) / 2, y: (size.height - 250 * unit) / 2)
-            context.scaleBy(x: unit, y: unit)
-            func rounded(_ rect: CGRect, _ radius: CGFloat) -> Path { Path(roundedRect: rect, cornerRadius: radius) }
-            func gradient(_ colors: [Color], _ from: CGPoint, _ to: CGPoint) -> GraphicsContext.Shading {
-                .linearGradient(Gradient(colors: colors), startPoint: from, endPoint: to)
-            }
-            let silver = Color(white: colorScheme == .dark ? 0.73 : 0.92)
-            let edge = Color(white: colorScheme == .dark ? 0.43 : 0.66)
-            let laptop = form == .laptop
-            let rect = MacDrawingGeometry.chassis(form)
-            let chassis = rounded(rect, laptop ? 15 : 35)
-            var shadow = context
-            shadow.addFilter(.shadow(color: .black.opacity(0.20), radius: 9, x: 0, y: 7))
-            shadow.fill(chassis, with: .color(edge))
-            context.fill(chassis, with: gradient([silver, Color(white: 0.81), silver, edge], CGPoint(x: 0, y: 30), CGPoint(x: 290, y: 275)))
-            context.stroke(chassis, with: .color(.white.opacity(0.75)), lineWidth: 1)
-            context.stroke(rounded(rect.insetBy(dx: 1.7, dy: 1.7), laptop ? 14 : 34), with: .color(.black.opacity(0.15)), lineWidth: 0.6)
-            if laptop {
-                // A foreshortened display leaves the plan-view socket positions legible.
-                let lidRect = CGRect(x: 10, y: 3, width: 260, height: 39)
-                let lid = rounded(lidRect, 7)
-                context.fill(lid, with: gradient([Color(white: 0.3), Color(white: 0.06)], CGPoint(x: 0, y: 3), CGPoint(x: 0, y: 42)))
-                context.stroke(lid, with: .color(.white.opacity(0.5)), lineWidth: 0.8)
-                let display = CGRect(x: 17, y: 8, width: 246, height: 27)
-                context.fill(rounded(display, 3), with: gradient([Color(red: 0.035, green: 0.09, blue: 0.18), Color(red: 0.12, green: 0.40, blue: 0.49), Color(red: 0.30, green: 0.68, blue: 0.68)], CGPoint(x: 17, y: 8), CGPoint(x: 263, y: 35)))
-                var waves = context
-                waves.clip(to: rounded(display, 3))
-                for index in 0..<4 {
-                    let offset = CGFloat(index) * 8
-                    var wave = Path()
-                    wave.move(to: CGPoint(x: 10, y: 38 + offset))
-                    wave.addCurve(to: CGPoint(x: 278, y: 12 + offset), control1: CGPoint(x: 90, y: -14 + offset), control2: CGPoint(x: 180, y: 56 + offset))
-                    waves.stroke(wave, with: .color(.white.opacity(0.10)), lineWidth: 5)
-                }
-                context.fill(rounded(CGRect(x: 133, y: 7, width: 14, height: 3), 1), with: .color(Color(white: 0.05)))
-                context.fill(rounded(CGRect(x: 37, y: 41, width: 206, height: 5), 2), with: gradient([Color(white: 0.10), Color(white: 0.3)], CGPoint(x: 37, y: 41), CGPoint(x: 37, y: 46)))
-                let keyboard = CGRect(x: 32, y: 57, width: 216, height: 98)
-                context.fill(rounded(keyboard, 7), with: .color(Color(white: 0.075)))
-                context.stroke(rounded(keyboard, 7), with: .color(.white.opacity(0.4)), lineWidth: 0.6)
-                func key(_ rect: CGRect) {
-                    let shape = rounded(rect, 2.5)
-                    context.fill(shape, with: gradient([Color(white: 0.25), Color(white: 0.13)], CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.minX, y: rect.maxY)))
-                    context.stroke(shape, with: .color(.white.opacity(0.16)), lineWidth: 0.45)
-                }
-                for col in 0..<14 { key(CGRect(x: 37 + CGFloat(col) * 14.8, y: 62, width: 12.1, height: 9)) }
-                let keyCounts = [10, 9, 7]
-                for row in 0..<3 {
-                    let y = 75 + CGFloat(row) * 18
-                    let leading: CGFloat = row == 2 ? 27 : (row == 1 ? 23 : 18)
-                    key(CGRect(x: 37, y: y, width: leading, height: 14))
-                    var x = 40 + leading
-                    for _ in 0..<keyCounts[row] {
-                        key(CGRect(x: x, y: y, width: 14, height: 14)); x += 17
-                    }
-                    if x < 242 { key(CGRect(x: x, y: y, width: 243 - x, height: 14)) }
-                }
-                for col in 0..<3 { key(CGRect(x: 37 + CGFloat(col) * 18, y: 129, width: 15, height: 17)) }
-                key(CGRect(x: 91, y: 129, width: 96, height: 17))
-                for col in 0..<3 { key(CGRect(x: 190 + CGFloat(col) * 18, y: 129, width: 15, height: 17)) }
-                let trackpad = CGRect(x: 73, y: 166, width: 134, height: 59)
-                context.fill(rounded(trackpad, 6), with: gradient([.white.opacity(0.14), .black.opacity(0.035)], CGPoint(x: 73, y: 166), CGPoint(x: 207, y: 225)))
-                context.stroke(rounded(trackpad, 6), with: .color(.black.opacity(0.25)), lineWidth: 0.7)
-                context.stroke(rounded(trackpad.insetBy(dx: 0.8, dy: 0.8), 5), with: .color(.white.opacity(0.30)), lineWidth: 0.5)
-                for y in stride(from: 63, through: 148, by: 3) {
-                    for x in [18, 21, 24, 256, 259, 262] {
-                        context.fill(Path(ellipseIn: CGRect(x: CGFloat(x), y: CGFloat(y), width: 0.7, height: 0.7)), with: .color(.black.opacity(0.38)))
-                    }
-                }
-                context.fill(rounded(CGRect(x: 119, y: 236, width: 42, height: 3), 1.5), with: .color(.black.opacity(0.18)))
-            } else {
-                let top = rect.insetBy(dx: 5, dy: 5)
-                context.stroke(rounded(top, 31), with: .color(.white.opacity(0.35)), lineWidth: 0.7)
-                context.fill(rounded(CGRect(x: 53, y: 225, width: 174, height: 4), 2), with: .color(.black.opacity(0.22)))
-                context.fill(Path(ellipseIn: CGRect(x: 230, y: 216, width: 2.5, height: 2.5)), with: .color(.white.opacity(0.95)))
-            }
-        }.accessibilityLabel(form == .laptop ? "Laptop viewed from above, screen hinge at the top" : "Desktop enclosure viewed from above, front at the bottom")
-    }
-}
-
-
-/// A flat connector silhouette matches the diagram's visual language.
-private enum CablePlugDrawing {
-    static func draw(at point: CGPoint, side: PortSide, magSafe: Bool, hdmi: Bool, usbA: Bool, scale: CGFloat, context: inout GraphicsContext) {
-        context.translateBy(x: point.x, y: point.y)
-        let angle: Double = side == .left ? 180 : side == .back ? -90 : side == .front ? 90 : 0
-        context.rotate(by: .degrees(angle)); context.scaleBy(x: scale, y: scale)
-        let width: CGFloat = magSafe ? 6 : 9
-        let height: CGFloat = magSafe || hdmi || usbA ? 12 : 8
-        let head: Path
-        if hdmi {
-            head = Path { path in
-                path.move(to: CGPoint(x: 0, y: -4))
-                path.addLines([CGPoint(x: 2, y: -6), CGPoint(x: width, y: -6), CGPoint(x: width, y: 6), CGPoint(x: 2, y: 6), CGPoint(x: 0, y: 4)])
-                path.closeSubpath()
-            }
-        } else {
-            head = Path(roundedRect: CGRect(x: 0, y: -height / 2, width: width, height: height), cornerRadius: magSafe || usbA ? 1.5 : 2.5)
-        }
-        context.fill(head, with: .color(Color(nsColor: .controlBackgroundColor)))
-        context.stroke(head, with: .color(.secondary.opacity(0.65)), lineWidth: 0.8)
-        var stem = Path(); stem.move(to: CGPoint(x: width, y: 0))
-        stem.addLine(to: CGPoint(x: magSafe ? 9 : 12, y: 0))
-        context.stroke(stem, with: .color(.secondary.opacity(0.65)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-    }
+/// Shared map dimensions, in unscaled map points.
+enum MapMetrics {
+    /// Width of a connected socket card and of each downstream device card.
+    static let card: CGFloat = 260
 }
 
 private enum ConnectionDrawing {
     static func stroke(_ path: Path, context: inout GraphicsContext, scale: CGFloat, phase: Double,
                        active: Bool, display: Bool, power: Bool, powerOutgoing: Bool = false, data: Bool = false, reduceMotion: Bool) {
+        // Wires are graphics, not text, so they use the vivid system hues in both appearances.
         var layers: [(color: Color, direction: Double, power: Bool)] = []
-        if display { layers.append((MapPalette.display, 1, false)) }
-        if power { layers.append((powerOutgoing ? MapPowerStyle.outgoing : MapPowerStyle.incoming, powerOutgoing ? 1 : -1, true)) }
-        if data { layers.append((MapPalette.data, 1, false)) }
-        if layers.isEmpty { layers = [(active ? MapPalette.data : .secondary, 1, false)] }
+        if display { layers.append((MapPalette.Graphic.display, 1, false)) }
+        if power { layers.append((powerOutgoing ? MapPalette.Graphic.outgoing : MapPalette.Graphic.incoming, powerOutgoing ? 1 : -1, true)) }
+        if data { layers.append((MapPalette.Graphic.data, 1, false)) }
+        if layers.isEmpty { layers = [(active ? MapPalette.Graphic.data : .secondary, 1, false)] }
+        let light = context.environment.colorScheme == .light
         let motion = phase.truncatingRemainder(dividingBy: 29.0 / 24.0) * 24
+        // A canvas-colored casing under the bundle keeps crossings and card edges clean, as in Maps.
+        if active {
+            let bundle = (CGFloat(layers.count - 1) * 3.5 + (layers.contains { $0.power } ? 3 : 2) + 4) * scale
+            context.stroke(path, with: .color(MapPalette.canvas), style: StrokeStyle(lineWidth: bundle, lineCap: .round))
+        }
         for (index, layer) in layers.enumerated() {
-            let offset = (CGFloat(index) - CGFloat(layers.count - 1) / 2) * 5 * scale
+            let offset = (CGFloat(index) - CGFloat(layers.count - 1) / 2) * 3.5 * scale
             let track = offsetTrack(path, offset: offset)
-            let width = (layer.power ? 3.2 : 1.8) * scale
-            context.stroke(track, with: .color(layer.color.opacity(active ? 0.65 : 0.18)), style: StrokeStyle(lineWidth: width, lineCap: .round))
+            // Light mode needs a little more weight to hold its own on a bright canvas.
+            let width = (layer.power ? (light ? 3 : 2.4) : (light ? 2 : 1.4)) * scale
+            // A soft track in the role color with saturated pulses travelling along it.
+            context.stroke(track, with: .color(layer.color.opacity(active ? (light ? 0.4 : 0.55) : 0.2)), style: StrokeStyle(lineWidth: width, lineCap: .round))
             if active && !reduceMotion {
-                context.stroke(track, with: .color(layer.color.opacity(0.95)), style: StrokeStyle(lineWidth: width, lineCap: .round,
-                    dash: [4 * scale, 25 * scale], dashPhase: CGFloat(-motion * layer.direction) * scale))
+                context.stroke(track, with: .color(layer.color), style: StrokeStyle(lineWidth: width, lineCap: .round,
+                    dash: [(light ? 9 : 4) * scale, (light ? 20 : 25) * scale], dashPhase: CGFloat(-motion * layer.direction) * scale))
+            } else if active {
+                context.stroke(track, with: .color(layer.color.opacity(0.85)), style: StrokeStyle(lineWidth: width, lineCap: .round))
             }
         }
     }

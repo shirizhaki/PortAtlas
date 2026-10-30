@@ -3,7 +3,7 @@ import CoreGraphics
 import PortAtlasCore
 import PortAtlasHardware
 
-enum AtlasSelection: Equatable {
+enum AtlasSelection: Hashable {
     case mac, socket(UUID), connector(String), device(String), connection(String), display(UInt32)
 }
 
@@ -36,7 +36,6 @@ final class AtlasStore: ObservableObject {
     func requestZoom(_ step: Int) { zoomRequest = MapZoomRequest(revision: zoomRequest.revision + 1, step: step) }
     @Published var animateConnections = true
     @Published var activeMapKind = AtlasMapKind.physical
-    @Published private(set) var mapIsFullScreen = false
     @Published private(set) var powerSample = PowerSample()
     @Published private(set) var networkLinks: [NetworkLink] = []
     @Published private(set) var powerHistory = PowerHistory()
@@ -125,18 +124,7 @@ final class AtlasStore: ObservableObject {
     }
     func registerMapWindow(_ window: NSWindow) {
         mapWindows.add(window)
-        if window.isMainWindow || mapWindows.allObjects.count == 1 {
-            mapIsFullScreen = window.styleMask.contains(.fullScreen)
-        }
         updateTelemetryVisibility()
-    }
-    func updateFullScreenState(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, mapWindows.contains(window) else { return }
-        mapIsFullScreen = window.styleMask.contains(.fullScreen)
-    }
-    func toggleMapFullScreen() {
-        guard let window = NSApp.keyWindow, mapWindows.contains(window) else { return }
-        window.toggleFullScreen(nil)
     }
     func setTelemetryVisible(_ visible: Bool) {
         guard telemetryVisible != visible else { return }
@@ -188,6 +176,19 @@ final class AtlasStore: ObservableObject {
     private var refreshAgain = false
     private let settingsStore = ConfigurationStore.standard
     var snapshot: TopologySnapshot { liveSnapshot }
+    /// The Mac drawn on the map. Debug builds accept `-previewProduct macMini` (or another
+    /// MacProduct case) to check the other illustrations on any Mac.
+    var macProduct: MacProduct {
+        #if DEBUG
+        if let raw = UserDefaults.standard.string(forKey: "previewProduct"), let product = MacProduct(rawValue: raw) { return product }
+        #endif
+        return snapshot.product
+    }
+    /// "MacBook Pro" from "MacBook Air (13-inch, M2, 2022)".
+    var macName: String {
+        guard let name = snapshot.productName else { return "This Mac" }
+        return name.components(separatedBy: " (").first ?? name
+    }
     var activeConnectionCount: Int {
         let topology = physicalTopology
         return topology.sockets.filter { !$0.devices.isEmpty || $0.connectors.contains { $0.connectionActive == true || !$0.links.isEmpty } }.count +
@@ -343,9 +344,16 @@ final class AtlasStore: ObservableObject {
         return capabilityLabel(for: socket.port)
     }
     func mapTitle(for node: HardwareNode) -> String {
-        if node.kind == .port { return physicalPort(for: node)?.name ?? node.name }
-        if node.kind == .controller, let index = snapshot.nodes.filter({ $0.kind == .controller }).firstIndex(where: { $0.id == node.id }) {
-            return "USB Controller \(index + 1)"
+        if node.kind == .port {
+            // Only the Mac's own branches carry a socket name; ports inside a dock use their number.
+            if node.connectorPath != nil { return physicalPort(for: node)?.name ?? node.name }
+            return node.portNumber.map { "Port \($0)" } ?? node.name
+        }
+        if node.kind == .controller {
+            // A controller inside a dock is named for the dock; the Mac's own are numbered.
+            if let parent = snapshot.node(node.parentID), parent.kind == .hub { return parent.name + " USB controller" }
+            let own = snapshot.nodes.filter { $0.kind == .controller && snapshot.node($0.parentID)?.kind != .hub }
+            if let index = own.firstIndex(where: { $0.id == node.id }) { return "USB Controller \(index + 1)" }
         }
         return node.name
     }

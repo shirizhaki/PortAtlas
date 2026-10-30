@@ -92,11 +92,11 @@ struct TelemetryTests {
     @Test func networkLinkRequiresValidActiveStatusAndIsIndependentOfUSB() {
         let connected = NetworkTelemetry.parse(["IOLinkStatus": 3, "IOLinkSpeed": 2500000000], id: "fixture", deviceID: "device", at: date)
         #expect(connected.bitsPerSecond == 2500000000)
-        #expect(connected.label == "Ethernet · 2.5 Gb/s")
+        #expect(connected.label == "2.5 Gb/s")
         let disconnected = NetworkTelemetry.parse(["IOLinkStatus": 1, "IOLinkSpeed": 2500000000], id: "fixture", deviceID: "device", at: date)
         #expect(disconnected.isActive == false && disconnected.bitsPerSecond == nil)
         let unknown = NetworkTelemetry.parse(["IOLinkStatus": 2], id: "fixture", deviceID: "device", at: date)
-        #expect(unknown.isActive == nil)
+        #expect(unknown.isActive == nil && !unknown.isPhysicalPort)
         let invalid = NetworkTelemetry.parse(["IOLinkStatus": -1, "IOLinkSpeed": true], id: "fixture", deviceID: "device", at: date)
         #expect(invalid.isActive == nil && invalid.bitsPerSecond == nil)
     }
@@ -105,5 +105,20 @@ struct TelemetryTests {
         #expect(PowerDiscovery.parseCable([sop])?.pdRevision == 3)
         #expect(PowerDiscovery.parseCable([sop, sop]) == nil)
         #expect(PowerDiscovery.parseCable([["ComponentName": "SOP", "Metadata": ["Product Type Description": "Passive Cable"]]]) == nil)
+    }
+}
+
+struct NetworkLinkTests {
+    @Test func virtualInterfaceWithoutASpeedIsNotAPort() {
+        // An iPhone over USB reports active links with no speed.
+        let iPhone = NetworkLink(id: "ncm", deviceID: "iphone", isActive: true, bitsPerSecond: nil, sampledAt: Date())
+        let unknown = NetworkLink(id: "x", deviceID: "iphone", isActive: nil, bitsPerSecond: nil, sampledAt: Date())
+        #expect(!iPhone.isPhysicalPort && !unknown.isPhysicalPort)
+    }
+    @Test func adapterReportsCableStateAndSpeedWithoutRepeatingItsName() {
+        let unplugged = NetworkLink(id: "a", deviceID: "adapter", isActive: false, bitsPerSecond: nil, sampledAt: Date())
+        let linked = NetworkLink(id: "b", deviceID: "adapter", isActive: true, bitsPerSecond: 1_000_000_000, sampledAt: Date())
+        #expect(unplugged.isPhysicalPort && unplugged.label == "No cable")
+        #expect(linked.label == "1 Gb/s")
     }
 }

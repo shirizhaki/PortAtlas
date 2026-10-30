@@ -20,59 +20,71 @@ struct PortMatchingView: View {
         store.physicalTopology.sockets.filter { $0.connectors.isEmpty && !$0.hasSavedAssignment }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(spacing: 0) {
+            Text("Match Physical Ports").font(.title2.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading).padding([.horizontal, .top], 20)
+            Form {
+                Section {
+                    Text("Plug one USB device into each port in turn and save where it is. PortAtlas remembers every port.")
+                        .foregroundStyle(.secondary)
+                    if let saved { Label(saved, systemImage: "checkmark.circle.fill").foregroundStyle(MapPowerStyle.incoming) }
+                }
+                Section {
+                    Picker("Connected device", selection: $selected) {
+                        Text("Choose a connection").tag(Optional<String>.none)
+                        ForEach(connected) { connector in
+                            Text(connectionLabel(connector)).tag(Optional(connector.id))
+                        }
+                    }
+                    LabeledContent {
+                        Button("Refresh") { store.refresh() }.disabled(store.isRefreshing)
+                    } label: {
+                        if connected.isEmpty {
+                            Text("Waiting for a USB device")
+                            Text("A charger alone can't identify a port.")
+                        } else {
+                            Text("Don't see your device?")
+                        }
+                    }
+                } header: {
+                    Text("1. Connect a device")
+                } footer: {
+                    FormFooter("Plug the device straight into the Mac, not into a hub or dock.")
+                }
+                Section {
+                    Picker("Side", selection: $side) {
+                        Text("Choose a side").tag(Optional<PortSide>.none)
+                        ForEach(PortSide.allCases) { Text($0.label).tag(Optional($0)) }
+                    }
+                    TextField("Port name", text: Binding(get: { name }, set: { value in
+                        if name != value { name = value; automaticName = value.isEmpty }
+                    }))
+                    if !emptySlots.isEmpty {
+                        Picker("Save to", selection: $target) {
+                            Text("New or existing position for this connection").tag(Optional<UUID>.none)
+                            ForEach(emptySlots) { Text($0.port.name).tag(Optional($0.id)) }
+                        }
+                    }
+                    if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                } header: {
+                    Text("2. Confirm its position")
+                } footer: {
+                    FormFooter(store.snapshot.formFactor == .laptop
+                         ? "Name side ports in order from the screen toward you. MagSafe and HDMI are found automatically."
+                         : "Name ports left to right as you face each panel. HDMI is found automatically.")
+                }.disabled(selected == nil)
+            }.formStyle(.grouped)
+            Divider()
+            // Standard sheet button row: dismiss on the left of the default action.
             HStack {
-                Text("Match physical ports").font(.title2.weight(.semibold))
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            Text("Use one recognizable USB device and move it between sockets. Confirm each position; the app remembers the connector for other devices too.")
-                .foregroundStyle(.secondary)
-            if let saved { Label(saved, systemImage: "checkmark.circle").foregroundStyle(.green) }
-            VStack(alignment: .leading, spacing: 12) {
-                Text("1. Connect a device").font(.headline)
-                Text("Connect directly to the Mac, then confirm the suggested connection.").font(.callout).foregroundStyle(.secondary)
-                Picker("Connected device", selection: $selected) {
-                    Text("Choose a connection").tag(Optional<String>.none)
-                    ForEach(connected) { connector in
-                        Text(connectionLabel(connector)).tag(Optional(connector.id))
-                    }
-                }
-                if connected.isEmpty {
-                    Text("Waiting for a USB device. A charging cable alone cannot identify a USB connection.").font(.caption).foregroundStyle(.secondary)
-                }
-                Button("Refresh connections", systemImage: "arrow.clockwise") { store.refresh() }.disabled(store.isRefreshing)
-            }.padding(16).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 12) {
-                Text("2. Confirm its position").font(.headline)
-                Picker("Side", selection: $side) {
-                    Text("Choose a side").tag(Optional<PortSide>.none)
-                    ForEach(PortSide.allCases) { Text($0.label).tag(Optional($0)) }
-                }
-                TextField("Port name", text: Binding(get: { name }, set: { value in
-                    if name != value { name = value; automaticName = value.isEmpty }
-                }))
-                if !emptySlots.isEmpty {
-                    Picker("Save to", selection: $target) {
-                        Text("New or existing position for this connection").tag(Optional<UUID>.none)
-                        ForEach(emptySlots) { Text($0.port.name).tag(Optional($0.id)) }
-                    }
-                }
-                Text(store.snapshot.formFactor == .laptop
-                     ? "Add sockets from the screen toward the front on each side. Fine-tune their order in Settings."
-                     : "Add front and back sockets from left to right, looking directly at that panel. Fine-tune their order in Settings.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(16).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14)).disabled(selected == nil)
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            Text("Confirm USB side and order here. MagSafe and a single built-in HDMI port appear automatically when reported.")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Spacer()
-                Button("Save position") { save() }
-                    .buttonStyle(.borderedProminent)
+                Button("Save Position") { save() }
+                    .keyboardShortcut(.defaultAction)
                     .disabled(selected == nil || side == nil || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.settingsNeedReset)
-            }
-        }.padding(24).frame(width: 580).fixedSize(horizontal: false, vertical: true)
+            }.padding(16)
+        }
+        .frame(width: 560, height: 600)
         .onAppear {
             previous = observation
             selected = observation.onlyOccupiedConnector

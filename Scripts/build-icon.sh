@@ -1,13 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Regenerates the flat Packaging/AppIcon.icns from the Icon Composer document.
+# build-app.sh compiles the document directly; this .icns is the fallback for
+# builds without full Xcode and for the Xcode project target.
 icon_work="$(mktemp -d)"
 trap 'rm -rf "$icon_work"' EXIT
-icon_set="$icon_work/AppIcon.iconset"
-mkdir -p "$icon_set"
-for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" Packaging/Artwork/AppIcon.png --out "$icon_set/icon_${size}x${size}.png" >/dev/null
-    doubled=$((size * 2))
-    sips -z "$doubled" "$doubled" Packaging/Artwork/AppIcon.png --out "$icon_set/icon_${size}x${size}@2x.png" >/dev/null
-done
-iconutil -c icns "$icon_set" -o Packaging/AppIcon.icns
+xcrun actool "$PWD/Packaging/AppIcon.icon" --compile "$icon_work" --platform macosx \
+    --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist "$icon_work/partial.plist" >/dev/null
+cp "$icon_work/AppIcon.icns" Packaging/AppIcon.icns

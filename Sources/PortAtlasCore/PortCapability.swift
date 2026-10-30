@@ -35,3 +35,29 @@ public struct MacCapabilityProfile: Sendable {
 }
 
 public enum MacFormFactor: String, Sendable { case laptop, desktop }
+
+/// Which Mac this is, for its illustration and name. Read from the product name macOS
+/// reports (for example "MacBook Air (13-inch, M2, 2022)"); this is not a model table.
+public enum MacProduct: String, CaseIterable, Sendable {
+    case macBook, macMini, macStudio, iMac, macPro, desktop
+    public init(productName: String?, hasBattery: Bool) {
+        let name = productName?.lowercased() ?? ""
+        // "iMac Pro" contains "mac pro", so iMac is checked first.
+        if name.hasPrefix("macbook") { self = .macBook }
+        else if name.hasPrefix("imac") { self = .iMac }
+        else if name.hasPrefix("mac mini") { self = .macMini }
+        else if name.hasPrefix("mac studio") { self = .macStudio }
+        else if name.hasPrefix("mac pro") { self = .macPro }
+        else { self = hasBattery ? .macBook : .desktop }
+    }
+    public var formFactor: MacFormFactor { self == .macBook ? .laptop : .desktop }
+    public var symbol: String {
+        switch self {
+        case .macBook: return "laptopcomputer"
+        case .macMini: return "macmini"
+        case .macStudio: return "macstudio"
+        case .iMac, .desktop: return "desktopcomputer"
+        case .macPro: return "macpro.gen3"
+        }
+    }
+}

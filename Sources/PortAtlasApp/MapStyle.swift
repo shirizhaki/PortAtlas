@@ -1,13 +1,29 @@
 import SwiftUI
 
-/// Preserve each connection role while giving small labels sufficient contrast
-/// on light content surfaces. AppKit resolves the colors for the active appearance.
+/// Connection roles use the system's vivid hues on dark backgrounds. In light mode
+/// slightly deeper variants keep icons, wires and small labels readable on white.
 enum MapPalette {
-    static let data = adaptive(.systemTeal, light: NSColor(srgbRed: 0.0, green: 0.42, blue: 0.50, alpha: 1))
+    static let data = adaptive(.systemTeal, light: NSColor(srgbRed: 0.0, green: 0.50, blue: 0.60, alpha: 1))
     // Purple, not red: red reads as an error state on an otherwise healthy connection.
-    static let display = adaptive(.systemPurple, light: NSColor(srgbRed: 0.47, green: 0.18, blue: 0.70, alpha: 1))
-    static let incoming = adaptive(.systemGreen, light: NSColor(srgbRed: 0.0, green: 0.46, blue: 0.22, alpha: 1))
-    static let outgoing = adaptive(.systemOrange, light: NSColor(srgbRed: 0.71, green: 0.285, blue: 0.0, alpha: 1))
+    static let display = adaptive(.systemPurple, light: NSColor(srgbRed: 0.58, green: 0.26, blue: 0.80, alpha: 1))
+    static let incoming = adaptive(.systemGreen, light: NSColor(srgbRed: 0.10, green: 0.55, blue: 0.24, alpha: 1))
+    static let outgoing = adaptive(.systemOrange, light: NSColor(srgbRed: 0.78, green: 0.36, blue: 0.0, alpha: 1))
+    /// Vivid system hues for graphics (wires, icons, tiles, bars), adapting to light and dark.
+    /// Graphics need less contrast than text, so they stay saturated on a white canvas;
+    /// colored text uses the deeper variants above.
+    enum Graphic {
+        static let data = Color(nsColor: .systemTeal)
+        static let display = Color(nsColor: .systemPurple)
+        static let incoming = Color(nsColor: .systemGreen)
+        static let outgoing = Color(nsColor: .systemOrange)
+    }
+    /// The map canvas: the standard window background, so cards and glass sit on a familiar surface.
+    static let canvas = Color(nsColor: .windowBackgroundColor)
+    /// Cards are raised above the canvas: white in light mode, a lighter gray in dark mode.
+    static let card = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.075) : NSColor.white
+    })
     private static func adaptive(_ dark: NSColor, light: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
@@ -26,9 +42,9 @@ struct MapPowerBadge: View {
     var scale: CGFloat = 1
     var body: some View {
         let color = outgoing ? MapPowerStyle.outgoing : MapPowerStyle.incoming
-        let text = (outgoing ? "Power out" : "Power in") + (scale >= 0.55 ? detail.map { " · " + $0 } ?? "" : "")
+        let text = (outgoing ? "Power out" : "Power in") + (detail.map { " · " + $0 } ?? "")
         Text(text)
-            .font(.system(size: 11 * max(0.85, scale), weight: .medium)).monospacedDigit()
+            .font(.system(size: 11 * scale, weight: .medium)).monospacedDigit()
             .foregroundStyle(color).padding(.horizontal, 7 * scale).padding(.vertical, 3 * scale)
             .background(color.opacity(0.08), in: Capsule()).lineLimit(1)
     }
@@ -57,106 +73,85 @@ struct MapFunctionIcons: View {
     var scale: CGFloat = 1
     var body: some View {
         HStack(spacing: 6 * scale) {
-            if scale >= 0.55 {
-                if appearance.data { Image(systemName: "arrow.left.arrow.right").foregroundStyle(MapPalette.data).accessibilityLabel("Data") }
-                if appearance.display { Image(systemName: "display").foregroundStyle(MapPalette.display).accessibilityLabel("Display") }
-                if appearance.power {
-                    Image(systemName: appearance.powerOutgoing ? "arrow.up" : "arrow.down")
-                        .foregroundStyle(appearance.powerOutgoing ? MapPowerStyle.outgoing : MapPowerStyle.incoming)
-                        .accessibilityLabel(appearance.powerOutgoing ? "Power out" : "Power in")
-                }
+            if appearance.data { Image(systemName: "arrow.left.arrow.right").foregroundStyle(MapPalette.Graphic.data).accessibilityLabel("Data") }
+            if appearance.display { Image(systemName: "display").foregroundStyle(MapPalette.Graphic.display).accessibilityLabel("Display") }
+            if appearance.power {
+                Image(systemName: appearance.powerOutgoing ? "arrow.up" : "arrow.down")
+                    .foregroundStyle(appearance.powerOutgoing ? MapPalette.Graphic.outgoing : MapPalette.Graphic.incoming)
+                    .accessibilityLabel(appearance.powerOutgoing ? "Power out" : "Power in")
             }
-        }.font(.system(size: 11 * max(0.85, scale), weight: .medium)).allowsHitTesting(false)
+        }.font(.system(size: 11 * scale, weight: .medium)).allowsHitTesting(false)
     }
 }
 
-/// Frosted content surfaces sit below the Liquid Glass control layer.
+/// Cards are content, not chrome: solid, quiet surfaces below the Liquid Glass control layer.
+/// Connection roles are carried by the card's icons and wires, so the edge stays neutral and
+/// only selection draws an accent ring.
 struct MapCardSurface: ViewModifier {
     var selected = false
     var subdued = false
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = 14
     var scale: CGFloat = 1
     var appearance = MapConnectionAppearance()
     var emphasized = true
     var select: (() -> Void)?
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ViewState private var hovered = false
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius * scale, style: .continuous)
+        let edge = Color(nsColor: .separatorColor)
         content
             .background {
-                ZStack {
-                    if reduceTransparency || contrast == .increased {
-                        shape.fill(Color(nsColor: .controlBackgroundColor))
-                    } else {
-                        shape.fill(.regularMaterial)
-                        shape.fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? (subdued ? 0.12 : 0.24) : (subdued ? 0.30 : 0.45)))
-                        shape.strokeBorder(LinearGradient(colors: [.white.opacity(colorScheme == .dark ? 0.16 : 0.20), .white.opacity(0.02)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.75)
-                    }
-                }.contentShape(shape).onTapGesture { select?() }
+                // An empty port is a quiet tag; a connection is a raised card.
+                shape.fill(subdued ? Color.primary.opacity(hovered ? 0.08 : 0.05) : MapPalette.card)
+                    .contentShape(shape).onTapGesture { select?() }
             }
             .overlay {
-                shape.strokeBorder(appearance.color?.opacity(selected ? 1 : hovered ? 0.95 : emphasized ? 0.85 : 0.45) ?? (selected ? Color.accentColor : Color.primary.opacity(contrast == .increased ? 0.35 : hovered ? 0.25 : colorScheme == .light ? 0.18 : 0.08)), lineWidth: selected ? 2.5 : appearance.color != nil ? 1.5 : 1)
-                    .allowsHitTesting(false)
-                ForEach(Array(appearance.colors.dropFirst().enumerated()), id: \.offset) { index, color in
-                    shape.inset(by: CGFloat(index + 1) * max(6 * scale, 3)).strokeBorder(color.opacity(selected ? 1 : emphasized ? 0.85 : 0.45), lineWidth: 1.5).allowsHitTesting(false)
+                if selected {
+                    shape.strokeBorder(Color.accentColor, lineWidth: 2.5).allowsHitTesting(false)
+                } else if !subdued || contrast == .increased {
+                    shape.strokeBorder(contrast == .increased || hovered ? Color.primary.opacity(0.3) : edge, lineWidth: 1)
+                        .allowsHitTesting(false)
                 }
             }
-            .shadow(color: .black.opacity(subdued ? 0.025 : hovered ? 0.10 : 0.065), radius: 8 * scale, y: 3 * scale)
+            .shadow(color: .black.opacity(subdued || colorScheme == .dark ? 0 : hovered ? 0.12 : 0.07), radius: hovered ? 6 : 3, y: 1)
+            .opacity(emphasized ? 1 : 0.45)
             .onHover { hovered = $0 }
     }
 }
 
-/// Semantic AppKit materials allow the canvas and inspector to blend with the
-/// desktop. These are content backgrounds, not additional Liquid Glass controls.
+/// The canvas: the window background with a quiet dot grid that pans and zooms with the map,
+/// as in Freeform. It gives the floating glass controls real content to refract.
 struct MapContentBackground: View {
-    var inspector = false
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.colorScheme) private var colorScheme
-
+    var scale: CGFloat = 1
+    var offset: CGSize = .zero
     var body: some View {
-        Group {
-            if reduceTransparency || contrast == .increased {
-                Color(nsColor: inspector ? .controlBackgroundColor : .windowBackgroundColor)
-            } else {
-                DesktopMaterial(material: inspector ? .sidebar : .underWindowBackground)
-                    .overlay(Color(nsColor: inspector ? .controlBackgroundColor : .windowBackgroundColor).opacity(inspector ? 0.36 : 0.18))
-                    .overlay(inspector || colorScheme == .dark ? Color.clear : Color.black.opacity(0.035))
+        Canvas { context, size in
+            var spacing = 24 * scale
+            while spacing < 12 { spacing *= 2 }  // keep the grid calm when zoomed far out
+            let origin = CGPoint(x: size.width / 2 + offset.width, y: size.height / 2 + offset.height)
+            let startX = origin.x - (origin.x / spacing).rounded(.down) * spacing
+            let startY = origin.y - (origin.y / spacing).rounded(.down) * spacing
+            var dots = Path()
+            var y = startY
+            while y < size.height {
+                var x = startX
+                while x < size.width { dots.addEllipse(in: CGRect(x: x - 1, y: y - 1, width: 2, height: 2)); x += spacing }
+                y += spacing
             }
-        }.allowsHitTesting(false).accessibilityHidden(true)
-    }
-}
-
-private struct DesktopMaterial: NSViewRepresentable {
-    var material: NSVisualEffectView.Material
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.blendingMode = .behindWindow
-        view.state = .followsWindowActiveState
-        view.material = material
-        return view
-    }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-    }
-}
-
-struct MapControlSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-    func body(content: Content) -> some View {
-        if reduceTransparency || contrast == .increased {
-            content.background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.primary.opacity(0.15)))
-        } else if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: 18))
-        } else {
-            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.primary.opacity(0.08)))
+            context.fill(dots, with: .color(Color(nsColor: .tertiaryLabelColor).opacity(0.55)))
         }
+        .background(MapPalette.canvas)
+        .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+/// Floating map controls are the one custom glass surface. The system adapts glass for
+/// Reduce Transparency and Increase Contrast, so it is never removed manually.
+struct MapControlSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content.glassEffect(.regular, in: .capsule)
     }
 }

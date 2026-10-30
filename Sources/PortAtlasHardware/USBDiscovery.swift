@@ -59,7 +59,9 @@ public enum USBDiscovery {
                 }
                 let name: String
                 if kind == .port { name = portNumber.map { "Logical port \($0)" } ?? registryName(service) }
-                else { name = string(properties, "USB Product Name") ?? string(properties, "kUSBProductString") ?? registryName(service) }
+                // A device without a product string would otherwise show its class name.
+                else { name = string(properties, "USB Product Name") ?? string(properties, "kUSBProductString")
+                    ?? (registryName(service) == "IOUSBHostDevice" ? (rawClass == 9 ? "USB hub" : "USB device") : registryName(service)) }
                 // Use the exported IOUSBHost key and its enum, not legacy Device Speed values.
                 let speed = kind == .device ? number(properties, IOUSBHostMatchingPropertyKey.speed.rawValue).flatMap(LinkSpeed.hostEnumeration) : nil
                 let power = [("kUSBBusCurrentAllocation", "Allocated bus current"), ("kUSBHubPowerSupply", "Hub downstream supply")]
@@ -78,12 +80,15 @@ public enum USBDiscovery {
                         ? protocols.map { $0 == "USB2" ? "USB 2" : "USB 3" }.joined(separator: " / ") + " branch" : nil))
             }
         }
+        nodes = ThunderboltBranches.attach(nodes)
+        let name = productName()
+        let product = MacProduct(productName: name, hasBattery: hasBattery())
         return TopologySnapshot(nodes: nodes, modelIdentifier: modelIdentifier(), notices: [
             "USB ancestry and available port transport state. Missing display, power and Thunderbolt route evidence remains unassigned."
         ], connectors: connectors.values.sorted { $0.id < $1.id },
            storage: StorageDiscovery.volumes(deviceIDs: Set(nodes.filter { $0.kind == .device }.map(\.id))),
-           formFactor: formFactor(), powerStatus: PowerDiscovery.status(),
-           thunderboltDevices: [])
+           formFactor: product.formFactor, powerStatus: PowerDiscovery.status(),
+           thunderboltDevices: [], product: product, productName: name)
     }
 
     private static func connector(at path: String, maximumSpeeds: [Int: LinkSpeed]) -> HardwareConnector? {
@@ -116,11 +121,22 @@ public enum USBDiscovery {
         return classes.sorted()
     }
 
-    private static func formFactor() -> MacFormFactor {
-        // A built-in battery supplies the laptop silhouette, independent of capabilities.
+    /// A built-in battery identifies a laptop when the product name is unavailable.
+    private static func hasBattery() -> Bool {
         let battery = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
-        guard battery != 0 else { return .desktop }
-        IOObjectRelease(battery); return .laptop
+        guard battery != 0 else { return false }
+        IOObjectRelease(battery); return true
+    }
+    /// The product name in the device tree, such as "MacBook Air (13-inch, M2, 2022)".
+    static func productName() -> String? {
+        let entry = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product")
+        guard entry != 0 else { return nil }
+        defer { IOObjectRelease(entry) }
+        guard let data = IORegistryEntryCreateCFProperty(entry, "product-name" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? Data,
+              let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: CharacterSet(charactersIn: "\0").union(.whitespaces)),
+              !text.isEmpty else { return nil }
+        return text
     }
 
     private static var isAppleSilicon: Bool {

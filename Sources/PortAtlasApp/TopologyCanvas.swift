@@ -50,7 +50,7 @@ private struct LogicalMapContent: View {
                     let a = CGPoint(x: start.x + 112, y: start.y), b = CGPoint(x: end.x - 112, y: end.y)
                     path.move(to: a)
                     path.addCurve(to: b, control1: CGPoint(x: (a.x + b.x) / 2, y: a.y), control2: CGPoint(x: (a.x + b.x) / 2, y: b.y))
-                    context.stroke(path, with: .color((node.displayID != nil ? MapPalette.display : MapPalette.data).opacity(store.emphasis(for: node.id) * 0.5)), lineWidth: 2)
+                    context.stroke(path, with: .color((node.displayID != nil ? MapPalette.Graphic.display : MapPalette.Graphic.data).opacity(store.emphasis(for: node.id) * 0.7)), lineWidth: 2)
                 }
             }.frame(width: layout.size.width * scale, height: layout.size.height * scale).allowsHitTesting(false)
             ForEach(store.snapshot.nodes) { node in
@@ -76,10 +76,19 @@ private struct LogicalMapContent: View {
         let socket = store.physicalPort(for: node).flatMap { port in store.physicalTopology.sockets.first { $0.id == port.id } }
         let powered = node.kind == .port && socket.map { store.receivesPower($0) || store.suppliesPower($0) } == true
         let active = node.kind == .device || node.kind == .hub || (node.kind == .port && !store.snapshot.children(of: node.id).isEmpty)
-        let height = max(34, CGFloat(76 + 60 * volumes.count) * scale)
+        // Power is shown on the USB branch nodes of the connector it enters or leaves through.
+        // Power badges appear once per connector, on its first branch, rather than on every branch.
+        let firstBranch = node.kind == .port && node.connectorPath != nil &&
+            store.snapshot.nodes.first { $0.kind == .port && $0.connectorPath == node.connectorPath }?.id == node.id
+        let powerIn = firstBranch && node.connectorPath == store.powerRoute?.connectorID
+        let powerOut = firstBranch ? node.connectorPath.flatMap { store.output(for: $0) } : nil
+        let badges = (powerIn ? 1 : 0) + (powerOut == nil ? 0 : 1)
+        let height = CGFloat(76 + 60 * volumes.count + 26 * badges) * scale
         let card = VStack(alignment: .leading, spacing: 8 * scale) {
             nodeHeader(node)
-        if scale >= 0.55 { ForEach(volumes) { StorageUsageView(volume: $0) } }
+            ForEach(volumes) { StorageUsageView(volume: $0) }
+            if powerIn { MapPowerBadge(detail: store.liveInput?.label, scale: scale) }
+            if let powerOut { MapPowerBadge(outgoing: true, detail: powerOut.label, scale: scale) }
         }
         return card.padding(12 * scale).frame(width: 224 * scale, height: height)
         .modifier(MapCardSurface(selected: selected, scale: scale, appearance: MapConnectionAppearance(active: active, display: node.displayID != nil, power: powered, powerOutgoing: powered && socket.map { store.suppliesPower($0) } == true, data: active && node.displayID == nil), emphasized: store.emphasis(for: node.id) == 1, select: { store.selection = .device(node.id) }))
@@ -91,30 +100,24 @@ private struct LogicalMapContent: View {
         return HStack(spacing: 10 * scale) {
             Button { store.selectedID = node.id } label: {
                 HStack(spacing: 10 * scale) {
-                    if scale >= 0.6 {
-                    Image(systemName: node.symbol).font(.system(size: 17 * max(0.85, scale))).foregroundStyle(node.displayID != nil ? MapPalette.display : MapPalette.data)
-                        .frame(width: 32 * scale, height: 36 * scale).background(MapPalette.data.opacity(0.08), in: RoundedRectangle(cornerRadius: 8 * scale))
-                    }
+                    Image(systemName: node.symbol).font(.system(size: 17 * scale)).foregroundStyle(node.displayID != nil ? MapPalette.Graphic.display : MapPalette.Graphic.data)
+                        .frame(width: 32 * scale, height: 32 * scale).background((node.displayID != nil ? MapPalette.Graphic.display : MapPalette.Graphic.data).opacity(0.14), in: RoundedRectangle(cornerRadius: 8 * scale, style: .continuous))
                     VStack(alignment: .leading, spacing: 5 * scale) {
-                        Text(scale < 0.6 && node.kind == .controller ? store.mapTitle(for: node).replacingOccurrences(of: "USB Controller", with: "Host") : store.mapTitle(for: node))
-                            .font(.system(size: 12 * max(0.85, scale), weight: .semibold)).lineLimit(1)
-                        if scale >= 0.6 || node.kind == .port {
-                            Text(scale < 0.6 ? subtitle(node).replacingOccurrences(of: " branch", with: "") : subtitle(node))
-                                .font(.system(size: scale < 0.6 ? 9 : 11 * max(0.85, scale))).foregroundStyle(.secondary).lineLimit(1)
-                        }
+                        Text(store.mapTitle(for: node))
+                            .font(.system(size: 12 * scale, weight: .semibold)).lineLimit(1)
+                        Text(subtitle(node))
+                            .font(.system(size: 11 * scale)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain)
-                .help(node.kind == .port
-                      ? "USB 2 and USB 3 branches can share a physical port."
-                      : node.name)
+                .help(node.name)
             if hasChildren {
                 Button {
                     if store.collapsed.contains(node.id) { store.collapsed.remove(node.id) } else { store.collapsed.insert(node.id) }
                 } label: {
                     Image(systemName: store.collapsed.contains(node.id) ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 10 * max(0.85, scale), weight: .semibold)).frame(width: max(18, 16 * scale), height: 28 * scale)
+                        .font(.system(size: 10 * scale, weight: .semibold)).frame(width: 18 * scale, height: 28 * scale)
                 }.buttonStyle(.plain).foregroundStyle(.secondary).help("Expand or collapse this branch")
             }
         }

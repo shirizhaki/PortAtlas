@@ -8,17 +8,13 @@ struct PortAtlasApp: App {
         WindowGroup {
             AtlasView().environmentObject(store)
                 .modifier(AppAppearancePreference())
-                .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 680, maxHeight: .infinity)
+                .frame(minWidth: 1100, maxWidth: .infinity, minHeight: 680, maxHeight: .infinity)
                 .onAppear {
                     NSApp.setActivationPolicy(.regular)
-                    if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-                       let icon = NSImage(contentsOf: url) {
-                        NSApp.applicationIconImage = icon
-                    }
                     NSApp.activate(ignoringOtherApps: true)
                 }
         }
-        .defaultSize(width: 1260, height: 810)
+        .defaultSize(width: 1440, height: 880)
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {

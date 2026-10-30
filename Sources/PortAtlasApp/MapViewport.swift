@@ -54,7 +54,9 @@ private struct MapPinch {
     var anchor: UnitPoint = .center
 }
 
-/// Both maps share interaction. Content is zoomed as a transform; SwiftUI redraws text and vectors at the zoomed size.
+/// Both maps share interaction. The map is laid out once and zoomed as a transform, so nothing
+/// reflows while zooming; the viewport renders through drawingGroup, which draws text and
+/// vectors at the final on-screen size, so they stay sharp at every zoom.
 struct MapViewport<Content: View>: View {
     @EnvironmentObject private var store: AtlasStore
     let kind: AtlasMapKind
@@ -66,7 +68,7 @@ struct MapViewport<Content: View>: View {
     @ViewState private var tapExclusions = MapTapExclusions()
     /// A map rebuilt in fit mode refits once measured; the window may have resized while it was hidden.
     @ViewState private var refitOnMeasure = true
-    private let range: ClosedRange<CGFloat> = 0.35...2.5
+    private let range: ClosedRange<CGFloat> = 0.2...2.5
     private var state: MapViewportState { kind == .physical ? store.physicalViewport : store.logicalViewport }
     private var scale: CGFloat { min(range.upperBound, max(range.lowerBound, state.zoom * pinch.magnification)) }
     private func update(_ value: MapViewportState) {
@@ -77,12 +79,14 @@ struct MapViewport<Content: View>: View {
         let y = max(0, (naturalSize.height * zoom - viewport.height) / 2) + viewport.height * 0.35
         return CGSize(width: min(x, max(-x, value.width)), height: min(y, max(-y, value.height)))
     }
+    /// Height of the toolbar the map runs under; fitting and corner labels stay below it.
+    @Environment(\.mapTopInset) private var topInset
     private func fit(_ viewport: CGSize, content: CGSize? = nil) {
         let size = content ?? naturalSize
         guard size.width > 0, size.height > 0 else { return }
         var next = state
-        next.zoom = min(1, max(range.lowerBound, min((viewport.width - 48) / size.width, (viewport.height - 100) / size.height)))
-        next.pan = .zero; next.fitMode = true; next.initialized = true; update(next)
+        next.zoom = min(1, max(range.lowerBound, min((viewport.width - 48) / size.width, (viewport.height - topInset - 100) / size.height)))
+        next.pan = CGSize(width: 0, height: topInset / 2); next.fitMode = true; next.initialized = true; update(next)
     }
     private func zoom(_ value: CGFloat, around point: CGPoint, viewport: CGSize) {
         var next = state
@@ -108,6 +112,11 @@ struct MapViewport<Content: View>: View {
             move(CGSize(width: event.scrollingDeltaX * lines, height: event.scrollingDeltaY * lines), viewport: viewport)
         }
     }
+    private func logicalPowerSummary(_ route: PowerRoute) -> String {
+        let port = store.physicalTopology.sockets.first { $0.connectors.contains { $0.id == route.connectorID } }?.port.name
+            ?? store.snapshot.connectors.first { $0.id == route.connectorID }?.label ?? "Unknown port"
+        return ["Power in", port, store.liveInput?.label].compactMap { $0 }.joined(separator: " · ")
+    }
     var body: some View {
         GeometryReader { geometry in
             let viewport = geometry.size
@@ -116,15 +125,17 @@ struct MapViewport<Content: View>: View {
             let previewPan = CGSize(width: relative.width - (relative.width - state.pan.width) * ratio + drag.width,
                 height: relative.height - (relative.height - state.pan.height) * ratio + drag.height)
             ZStack {
-                MapContentBackground()
-                // Laid out once at 100% and zoomed as a transform, so cards keep their shape
-                // while zooming instead of re-flowing at every step.
                 content().environment(\.mapScale, 1)
                     .background(GeometryReader { proxy in Color.clear.preference(key: ContentSize.self, value: MeasuredMapSize(size: proxy.size, ready: store.snapshot.modelIdentifier != "Unknown Mac")) })
                     .scaleEffect(scale)
                     .offset(bounded(previewPan, viewport: viewport, at: scale))
             }
-            .frame(width: viewport.width, height: viewport.height).clipped().contentShape(Rectangle())
+            .frame(width: viewport.width, height: viewport.height)
+            // Text and shapes are rasterized at the zoomed size instead of magnifying a 100% render.
+            .drawingGroup()
+            // The grid stays outside the drawing group, so animated wires do not redraw it each frame.
+            .background { MapContentBackground(scale: scale, offset: bounded(previewPan, viewport: viewport, at: scale)) }
+            .clipped().contentShape(Rectangle())
             .background(ScrollWheelReader { event, point in scroll(event, at: point, viewport: viewport) })
             .simultaneousGesture(SpatialTapGesture().onEnded { value in
                 if !tapExclusions.contains(value.location) { store.selection = nil }
@@ -171,25 +182,40 @@ struct MapViewport<Content: View>: View {
             .overlayPreferenceValue(WireInteractionAreas.self) { areas in
                 GeometryReader { proxy in
                     Color.clear.allowsHitTesting(false).preference(key: MapTapExclusionPreference.self, value: MapTapExclusions(wires: areas.map { area in
-                        // Paths are in unscaled map coordinates; the anchor origin is already zoomed.
+                        // Paths are in layout coordinates; the anchor origin already includes the zoom.
                         let origin = proxy[area.bounds].origin
                         return area.path.applying(CGAffineTransform(scaleX: scale, y: scale).concatenating(CGAffineTransform(translationX: origin.x, y: origin.y)))
                     }))
                 }
             }
             .overlay(alignment: .bottomLeading) {
-                HStack(spacing: 12) {
-                    Button { zoom(state.zoom / 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "minus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom out · ⌘−").accessibilityLabel("Zoom out").disabled(scale <= range.lowerBound)
-                    Text("\(Int(scale * 100))%").monospacedDigit().frame(width: 40)
-                    Button { zoom(state.zoom * 1.2, around: CGPoint(x: viewport.width / 2, y: viewport.height / 2), viewport: viewport) } label: { Image(systemName: "plus.magnifyingglass").frame(width: 24, height: 24) }.help("Zoom in · ⌘=").accessibilityLabel("Zoom in").disabled(scale >= range.upperBound)
-                    Divider().frame(height: 16)
-                    Button("Fit All") { fit(viewport) }.help("Fit all connections · ⌘0")
-                    Button("Focus Selection") { store.focusRevision += 1 }.disabled(store.selection == nil).help("Center selection · ⌘L")
+                let center = CGPoint(x: viewport.width / 2, y: viewport.height / 2)
+                HStack(spacing: 4) {
+                    Button { zoom(state.zoom / 1.2, around: center, viewport: viewport) } label: { MapControlIcon("minus") }
+                        .help("Zoom out · ⌘−").accessibilityLabel("Zoom out").disabled(scale <= range.lowerBound)
+                    Menu {
+                        ForEach([0.5, 0.75, 1, 1.5, 2] as [CGFloat], id: \.self) { level in
+                            Button("\(Int(level * 100))%") { zoom(level, around: center, viewport: viewport) }
+                        }
+                        Divider()
+                        Button("Fit All") { fit(viewport) }
+                    } label: {
+                        Text("\(Int((scale * 100).rounded()))%").monospacedDigit()
+                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(minWidth: 44)
+                        .help("Zoom level").accessibilityLabel("Zoom level \(Int((scale * 100).rounded())) percent")
+                    Button { zoom(state.zoom * 1.2, around: center, viewport: viewport) } label: { MapControlIcon("plus") }
+                        .help("Zoom in · ⌘=").accessibilityLabel("Zoom in").disabled(scale >= range.upperBound)
+                    Divider().frame(height: 18).padding(.horizontal, 4)
+                    Button { fit(viewport) } label: { MapControlIcon("arrow.up.left.and.arrow.down.right") }
+                        .help("Fit all connections · ⌘0").accessibilityLabel("Fit All")
+                    Button { store.focusRevision += 1 } label: { MapControlIcon("scope") }
+                        .disabled(store.selection == nil).help("Center selection · ⌘L").accessibilityLabel("Focus Selection")
                     if kind == .physical {
-                        Divider().frame(height: 16)
-                        Toggle(isOn: $store.animateConnections) { Image(systemName: "waveform.path").frame(width: 24, height: 24) }.toggleStyle(.button).accessibilityLabel("Animate connections").help("Animate connections. Motion does not represent measured traffic or power.")
+                        Toggle(isOn: $store.animateConnections) { MapControlIcon("waveform.path") }
+                            .toggleStyle(.button).accessibilityLabel("Animate connections")
+                            .help("Animate connections. Motion does not represent measured traffic or power.")
                     }
-                }.font(.callout).buttonStyle(.borderless).padding(.horizontal, 14).padding(.vertical, 10)
+                }.buttonStyle(.borderless).padding(.horizontal, 8).padding(.vertical, 5)
                     .modifier(MapControlSurface())
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: MapTapExclusionPreference.self, value: MapTapExclusions(cards: [proxy.frame(in: .named(kind == .physical ? "physical-viewport" : "logical-viewport"))]))
@@ -201,18 +227,34 @@ struct MapViewport<Content: View>: View {
                 if kind == .physical {
                     HStack(spacing: 14) {
                         if store.snapshot.nodes.contains(where: { ($0.kind == .device || $0.kind == .hub) && $0.displayID == nil }) {
-                            Label("Data", systemImage: "arrow.left.arrow.right").foregroundStyle(MapPalette.data)
+                            MapLegendItem(title: "Data", symbol: "arrow.left.arrow.right", color: MapPalette.Graphic.data)
                         }
                         if store.physicalTopology.sockets.contains(where: { store.carriesDisplay($0) }) {
-                            Label("Display", systemImage: "display").foregroundStyle(MapPalette.display)
+                            MapLegendItem(title: "Display", symbol: "display", color: MapPalette.Graphic.display)
                         }
                         if store.powerRoute != nil {
-                            Label("Power in", systemImage: "arrow.down").foregroundStyle(MapPowerStyle.incoming)
+                            MapLegendItem(title: "Power in", symbol: "arrow.down", color: MapPalette.Graphic.incoming)
                         }
                         if store.physicalTopology.sockets.contains(where: { store.suppliesPower($0) }) {
-                            Label("Power out", systemImage: "arrow.up").foregroundStyle(MapPowerStyle.outgoing)
+                            MapLegendItem(title: "Power out", symbol: "arrow.up", color: MapPalette.Graphic.outgoing)
                         }
-                    }.font(.caption).padding(16).allowsHitTesting(false)
+                    }.font(.caption).padding(16).padding(.top, topInset).allowsHitTesting(false)
+                } else if let route = store.powerRoute {
+                    // The Logical tree has no node for a power-only connection (MagSafe, a bare
+                    // charger), so the source is summarized here and links to that connector.
+                    Button { store.selection = .connector(route.connectorID) } label: {
+                        Label { Text(logicalPowerSummary(route)).foregroundStyle(MapPowerStyle.incoming) }
+                            icon: { Image(systemName: "bolt.fill").foregroundStyle(MapPalette.Graphic.incoming) }
+                            .monospacedDigit()
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                    }
+                    .buttonStyle(.plain).font(.callout.weight(.medium))
+                    .modifier(MapControlSurface())
+                    .help("Show the port this Mac is receiving power through")
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: MapTapExclusionPreference.self, value: MapTapExclusions(cards: [proxy.frame(in: .named("logical-viewport"))]))
+                    })
+                    .padding(16).padding(.top, topInset)
                 }
             }
             .focusable(store.activeMapKind == kind).focusEffectDisabled().focused($keyboardFocused)
@@ -229,7 +271,7 @@ struct MapViewport<Content: View>: View {
     }
 }
 
-/// SwiftUI has no scroll-wheel event for plain views on macOS 14. A local monitor
+/// SwiftUI has no scroll-wheel event for plain views. A local monitor
 /// observes scrolls over this view's bounds and leaves clicks to SwiftUI.
 private struct ScrollWheelReader: NSViewRepresentable {
     var onScroll: (NSEvent, CGPoint) -> Void
@@ -254,5 +296,33 @@ private struct ScrollWheelReader: NSViewRepresentable {
                 return nil
             }
         }
+    }
+}
+
+/// Floating-control glyphs share one size, so the bar reads as a single native control group.
+private struct MapControlIcon: View {
+    let name: String
+    init(_ name: String) { self.name = name }
+    var body: some View {
+        Image(systemName: name).font(.system(size: 13, weight: .medium)).frame(width: 28, height: 26).contentShape(Rectangle())
+    }
+}
+
+/// A legend entry: the role's vivid symbol beside plain secondary text.
+private struct MapLegendItem: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    var body: some View {
+        Label { Text(title).foregroundStyle(.secondary) } icon: { Image(systemName: symbol).foregroundStyle(color) }
+    }
+}
+
+private struct MapTopInset: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+extension EnvironmentValues {
+    /// The toolbar height above a full-bleed map.
+    var mapTopInset: CGFloat {
+        get { self[MapTopInset.self] }
+        set { self[MapTopInset.self] = newValue }
     }
 }

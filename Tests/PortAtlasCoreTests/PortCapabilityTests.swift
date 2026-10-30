@@ -27,3 +27,19 @@ struct PortCapabilityTests {
         #expect(restored.ports[1].capability == .unknown)
     }
 }
+
+struct MacProductTests {
+    @Test func productNameChoosesTheIllustration() {
+        #expect(MacProduct(productName: "MacBook Air (13-inch, M2, 2022)", hasBattery: true) == .macBook)
+        #expect(MacProduct(productName: "Mac mini (2024)", hasBattery: false) == .macMini)
+        #expect(MacProduct(productName: "Mac Studio (2025)", hasBattery: false) == .macStudio)
+        #expect(MacProduct(productName: "iMac (24-inch, 2024)", hasBattery: false) == .iMac)
+        #expect(MacProduct(productName: "iMac Pro (2017)", hasBattery: false) == .iMac)
+        #expect(MacProduct(productName: "Mac Pro (2023)", hasBattery: false) == .macPro)
+    }
+    @Test func missingNameFallsBackToTheBattery() {
+        #expect(MacProduct(productName: nil, hasBattery: true) == .macBook)
+        #expect(MacProduct(productName: nil, hasBattery: false) == .desktop)
+        #expect(MacProduct(productName: "Virtual Machine", hasBattery: false).formFactor == .desktop)
+    }
+}

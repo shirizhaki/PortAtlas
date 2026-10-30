@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PortAtlas",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     products: [
         .executable(name: "PortAtlas", targets: ["PortAtlasApp"]),
         .library(name: "PortAtlasCore", targets: ["PortAtlasCore"]),

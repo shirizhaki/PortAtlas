@@ -1,135 +1,110 @@
 # PortAtlas
 
-A native macOS app that maps the devices connected to your Mac: USB, Thunderbolt/USB4, storage, external displays, and available power readings.
+See what is plugged into your Mac, which port it is in, and what each connection is doing: data, displays and power.
 
-**Early 0.1.0 preview · Apple Silicon · macOS 26 or newer.** PortAtlas reads local hardware information. It has no network services or analytics. Hardware and macOS versions expose different amounts of information; missing or ambiguous readings stay unavailable.
+**Version 1.0.0 · Apple Silicon · macOS 26 or later.** PortAtlas reads local hardware information only. It has no network services, accounts or analytics.
 
-**Physical view** — connections grouped by the Mac's physical sockets, with downstream devices, display routing, and available power readings.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Docs/Images/physical-dark.png">
+  <img alt="PortAtlas physical map: a MacBook Pro at the center with a portable SSD on the left, MagSafe charging, and a Thunderbolt dock on the right driving a 5K display and an NVMe SSD" src="Docs/Images/physical-light.png">
+</picture>
 
-![PortAtlas physical view showing connected storage, a Thunderbolt dock, a display, and an iPhone](Docs/Images/physical-map.png)
+## Download
 
-**Logical view** — the reported device hierarchy, including USB branches and downstream hubs.
+Get **PortAtlas-1.0.0.dmg** from [Releases](https://github.com/shirizhaki/PortAtlas/releases), open it, and drag PortAtlas to Applications. Release builds are signed with a Developer ID and notarized by Apple, so macOS opens them without a security warning.
 
-![PortAtlas logical view showing the reported USB and Thunderbolt device hierarchy](Docs/Images/logical-map.png)
+## What it shows
 
-## The map
+- **Physical map.** Your Mac, drawn as the model it is (MacBook, Mac mini, Mac Studio, iMac or Mac Pro), with every port in place. Connected devices hang off the port they use, and docks show what is attached through them.
+- **Logical map.** The tree macOS reports: controllers, USB 2, USB 3 and Thunderbolt branches, hubs and devices. A dock appears under the Mac port it is plugged into.
+- **Live connections.** Wires are colored by what they carry: teal for data, purple for displays, green for power coming in and orange for power going out to accessories.
+- **Power.** Live power input, which port is charging the Mac, the charger's limit, battery level, and power supplied to accessories where the Mac reports it.
+- **Displays.** The signal resolution and refresh rate actually sent to each display, separate from the desktop size macOS scales to.
+- **Storage.** Mounted volumes and free space on connected drives.
+- **Inspector.** Select anything for a plain-language summary. Everything technical, from negotiated voltages to EDID, is one click away in Technical Details.
 
-- **Physical view** groups connections by the Mac's physical sockets, with downstream accessories and optional dock-component overrides.
-- **Logical view** preserves the reported device ancestry. Changing physical presentation never changes this topology.
-- Both views support pan, zoom, Fit All, Focus Selection, and an inspector. Click empty map space or press Escape to close details.
-- Data, display, incoming power, and outgoing power have distinct colors and icons. Power tracks are thicker; animation indicates direction rather than measured traffic.
-- Storage cards show mounted capacity when the device-to-volume association is verified.
-- A uniquely matched display can follow its HDMI or DisplayPort route, including through a Thunderbolt dock. Actual signal resolution is separate from macOS scaling. Reported selected VRR ranges, nominal refresh, available macOS desktop modes, and validated EDID details appear in the inspector. Instantaneous HDMI refresh and application FPS are not measured.
-- Optional live Mac-input and USB-C-output readings are separate from USB-PD contracts and adapter ratings. Output describes the Mac connector, not an accessory's battery state or consumption beyond a dock.
-- Choose Follow System, Light, or Dark in Settings. Floating controls use Liquid Glass on macOS 26+, with standard material fallbacks. Cards use standard materials, and accessibility contrast, transparency, and motion settings are respected.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Docs/Images/logical-dark.png">
+  <img alt="PortAtlas logical map: a Mac USB controller with the right port's Thunderbolt branch leading to a dock, its display, SSD, USB hub, keyboard and audio interface" src="Docs/Images/logical-light.png">
+</picture>
 
-## Match physical ports
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Docs/Images/inspector-dark.png">
+  <img alt="PortAtlas inspector showing a selected Thunderbolt dock: its speed, maker, the port it is plugged into and the devices behind it" src="Docs/Images/inspector-light.png">
+</picture>
 
-Hardware discovery does not depend on a Mac model list. However, a hardware connector number does **not** universally identify its left/right/front/back location.
+## Getting started
 
-1. Click **Match ports** above the map or in **PortAtlas → Settings…** (⌘,).
-2. Connect one recognizable USB device directly to a Mac socket. A unique new host connection is suggested; if several devices are connected, choose the correct one.
-3. Confirm the side and port name, then choose **Save position**. Repeat by moving the device to the next socket.
-4. Add sockets in physical order. On laptop sides, start closest to the screen. On desktop front/back panels, start at the left while looking directly at that panel. Use Settings arrows to adjust order afterward.
-5. Recheck after reconnecting, restarting, and macOS upgrades. Saved registry paths are local associations; their stability across OS changes is not guaranteed.
+macOS reports which connector a device uses, but not whether that connector is on the left or the right. Name your ports once:
 
-USB 2 and USB 3 branches sharing the same validated connector follow one assignment. A previously created empty position can be reused. The guide never chooses a physical side or overwrites a different occupied socket automatically.
+1. Choose **Match Ports…** in the sidebar or in **PortAtlas → Settings** (⌘,).
+2. Plug one USB device straight into a port on the Mac, not into a hub or dock.
+3. Confirm the side and name, then **Save Position**. Move the device to the next port and repeat.
 
-MagSafe appears only when reported, on the left nearest the hinge. A single built-in HDMI connector appears automatically, with a default right-side laptop or rear desktop position that Settings can adjust. Explicitly reported built-in USB-A IOPorts can be matched too. USB-A discovery on desktop hardware still needs validation; internal USB branches and dock sockets are not guessed to be Mac sockets. Missing connector evidence leaves devices unmapped and available in Logical view.
+MagSafe and a built-in HDMI port are found automatically. You can rename and reorder ports in Settings at any time.
 
-## Dock components
+**Navigating:** two-finger scroll pans, pinch or ⌘-scroll zooms, ⌘1 and ⌘2 switch maps, ⌘0 fits everything, ⌘L centers the selection, and Escape closes the inspector.
 
-Use a component's inspector or context menu to choose **Automatic**, **Dock component**, or **Separate accessory**. Choices are saved independently of port positions and retained for the same device at the same connection route. A different route can require another choice. Automatic grouping is a presentation hint, not proof that an Ethernet adapter or receiver is physically built into a dock.
+## Accuracy
 
-## Accuracy and hardware coverage
+PortAtlas only shows what macOS reports and leaves anything ambiguous unassigned rather than guessing.
 
-- USB device rates describe enumeration, not benchmark throughput. Hardware maximum Thunderbolt/USB4 rates and positively reported USB/DisplayPort protocols supply port support labels. An advanced manual override is optional. The small model-reference list supplies specification links, not runtime port allocation.
-- HDMI presence is detected without a model database. The port's maximum HDMI version/bandwidth is unavailable unless independently reported. Internal DisplayPort lane capacity is not presented as HDMI cable bandwidth.
-- EDID describes the display. Decoded detailed timings are a subset of its advertised modes. Available macOS modes can include scaled render sizes and do not establish the port's maximum capability.
-- Display matching requires unique identity and route evidence. Identical displays, virtual screens, or missing controller properties can leave readings or routes unavailable.
-- Incoming-power routing is an explicitly labeled inference from a unique selected contract or restricted MagSafe evidence. Contract limits are not current draw. Optional read-only SMC telemetry and firmware readings vary across hardware; zero, missing, stale, and ambiguous readings are kept distinct.
-- Built-in SD readers and built-in Ethernet ports are not yet separate physical sockets in the map. Connected Ethernet accessories can expose link information.
-- Initial hands-on coverage is one Apple Silicon MacBook Pro with USB storage, a Thunderbolt dock, displays, and charging. Automated fixtures cover additional topologies, but they cannot establish support across all Macs. See the [hardware validation checklist](Docs/HardwareValidation.md).
+- Speeds are the negotiated link rate, not measured transfer speed.
+- Charger figures are the agreed power limit, not what the Mac is drawing. The live power-in reading is measured separately.
+- Which port is charging the Mac is inferred from its power contract and labeled as such.
+- Identical displays, virtual screens or missing driver details can leave a display's route unavailable.
+- Hands-on testing so far covers one Apple Silicon MacBook Pro with USB storage, a Thunderbolt dock, displays and charging; other Macs are covered by automated fixtures. See the [hardware validation checklist](Docs/HardwareValidation.md).
 
-The direct-download app is unsandboxed. Discovery uses public IOKit entry points and optional driver properties, including an unprivileged read-only AppleSMC client. It never resets or writes devices. In a sandboxed test, every discovery path worked except the AppleSMC client; power readings then fall back to the battery controller's slower telemetry.
+PortAtlas never writes to or resets devices. Discovery uses public IOKit interfaces and a read-only connection to the Mac's power sensors.
 
-## Build locally
+## Privacy
 
-**Build tools:** Xcode 26+ with the macOS 26 SDK, or matching Command Line Tools for the Swift-package build. The runtime minimum is macOS 26. Full Xcode is required for the `.xcodeproj` target. No external packages are downloaded.
+Nothing leaves your Mac. Port names and layout choices are stored locally:
 
-Open `PortAtlas.xcodeproj`, select the **PortAtlas** scheme, and Run. Local signing is disabled. Alternatively:
+- Port names and positions: `~/Library/Application Support/PortAtlas/ports.json`
+- Dock layout choices: `~/Library/Application Support/PortAtlas/presentation.json`
+
+Display identities, power history and hardware snapshots are kept in memory only. Delete those two files to start fresh.
+
+## Build from source
+
+Requires Xcode 26 or later. No external packages are downloaded.
+
+Open `PortAtlas.xcodeproj` and run the **PortAtlas** scheme, or from Terminal:
 
 ```sh
-./Scripts/check-toolchain.sh
 swift build
 ./Scripts/test.sh
-swift run PortAtlas
-```
-
-To build a Finder-launchable local app:
-
-```sh
 ./Scripts/build-app.sh
 open build/PortAtlas.app
 ```
 
-This packages both licenses, strips debug symbols, and signs ad hoc. It does not publish, notarize, or upload anything. The optional GitHub workflow builds/tests the package and Xcode target using a macOS 26 runner; it has no release or publishing step.
+`build-app.sh` produces a locally signed app with its Liquid Glass icon. To build a signed, notarized disk image, install a Developer ID Application certificate, save notarization credentials once with `xcrun notarytool store-credentials PortAtlas`, then run `./Scripts/release.sh`.
 
-To build a signed, notarized disk image for download, install a Developer ID Application certificate, save notarization credentials once with `xcrun notarytool store-credentials PortAtlas`, then run:
+Debug builds accept `-demoTopology YES` to show invented example hardware, which is how the screenshots above were made; demo mode never touches saved settings.
 
-```sh
-./Scripts/release.sh
-```
-
-It signs with the hardened runtime, notarizes and staples `build/PortAtlas-<version>.dmg`, and writes its SHA-256 checksum. It does not upload anything.
-
-## Local settings and a fresh start
-
-- Port names and assignments: `~/Library/Application Support/PortAtlas/ports.json`
-- Dock presentation choices: `~/Library/Application Support/PortAtlas/presentation.json`
-- Appearance: app-local UserDefaults.
-
-To test fresh **port matching**, quit the app and move only `ports.json` to a private backup outside the checkout. Relaunch to see hardware discovery without saved positions. Keep `presentation.json` to retain dock choices. Restore the backed-up layout while the app is closed; back up any new layout first. Replacing the app bundle alone does not clear settings. A truly new-user test can use a separate macOS user account, without disturbing existing preferences.
-
-EDID, display identities, power graphs, and hardware snapshots are session-only. No real hardware captures belong in the repository. Keep screenshots of personal volume/device names private.
-
-## Sharing source
-
-```sh
-python3 Scripts/package-source.py
-```
-
-Before publishing Git history, run `python3 Scripts/package-source.py --check-git-history`.
-This also requires the neutral project identity in author and committer metadata
-for every commit reachable from HEAD. The project's initial publication uses a
-reserved, non-deliverable `.invalid` address, rather than an account email or a
-GitHub user-specific no-reply address. Inspect the actual uploaded history before
-making a repository public; hosting tools may substitute account identities.
-
-This creates `build/PortAtlas-source.zip` from Git-visible files and rejects common personal-path, credential, settings, and capture patterns, including sensitive files already tracked before ignore rules were added. It is a limited local check, not a guarantee; inspect the result before sharing. `.gitignore` excludes build outputs, debug symbols, captures, local settings, editor state, and common credential files. Do not upload the entire working folder or local backups.
-
-## Project layout
+Before sharing source or history, run `python3 Scripts/package-source.py --check-git-history`. It blocks personal paths, credentials and unapproved email addresses, and requires every commit to use an approved identity and UTC time.
 
 ```text
-Sources/PortAtlasCore/        Models, topology projections, matching, persistence
+Sources/PortAtlasCore/        Models, topology, matching and persistence
 Sources/PortAtlasHardware/    Read-only discovery and telemetry
-Sources/PortAtlasApp/         SwiftUI app and presentation
+Sources/PortAtlasApp/         SwiftUI app
 Sources/PortAtlasDiagnostics/ Read-only diagnostics
 Tests/PortAtlasCoreTests/     Synthetic fixtures and regression tests
-Docs/                        Architecture, evidence, hardware validation
-Scripts/                     Local build, tests, source packaging
-PortAtlas.xcodeproj/          Native app target using local package libraries
+Packaging/                    Info.plist, privacy manifest and Icon Composer icon
+Docs/                         Architecture, evidence and hardware validation
 ```
 
 ## Contributors
 
-- [@shirizhaki](https://github.com/shirizhaki) — Project creator, product direction, design, and hardware testing.
-- [OpenAI Codex](https://openai.com/codex/) — AI-assisted implementation, debugging, testing, and release preparation.
+- [@shirizhaki](https://github.com/shirizhaki): creator, product direction, design and hardware testing.
+- [@codex](https://github.com/codex) (OpenAI Codex): original implementation, debugging and testing.
+- [@claude](https://github.com/claude) (Anthropic Claude): 1.0 redesign, performance and reliability work.
 
 ## License and acknowledgements
 
-PortAtlas is available under the [MIT License](LICENSE), copyright 2026 PortAtlas contributors. Preserve its copyright and permission notice when redistributing copies or substantial portions.
+PortAtlas is released under the [MIT License](LICENSE), copyright 2026 PortAtlas contributors.
 
-Selected discovery and power-reading approaches are adapted from **WhatPort**, copyright 2025 Darryl Morley, also under MIT. Its original notice is retained verbatim in [ThirdPartyNotices/WhatPort-LICENSE.txt](ThirdPartyNotices/WhatPort-LICENSE.txt) and included in the app. Preserve both notices for distributions containing those adaptations. See [adaptation details](Docs/ThirdParty.md).
+Some discovery and power-reading code is adapted from [WhatPort](https://github.com/darrylmorley/whatport) by Darryl Morley, also MIT licensed. Its notice is in [ThirdPartyNotices/WhatPort-LICENSE.txt](ThirdPartyNotices/WhatPort-LICENSE.txt) and ships inside the app. See the [adaptation details](Docs/ThirdParty.md).
 
-See also [architecture](Docs/Architecture.md), [capability evidence](Docs/PortCapabilities.md), and [contributing](CONTRIBUTING.md).
+See also the [architecture notes](Docs/Architecture.md), [capability evidence](Docs/PortCapabilities.md) and [contributing guide](CONTRIBUTING.md).

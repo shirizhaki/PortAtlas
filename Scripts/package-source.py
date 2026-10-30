@@ -9,11 +9,22 @@ import zipfile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--check-git-history", action="store_true",
-                    help="Also require anonymous author/committer metadata in every commit reachable from HEAD.")
+                    help="Also require approved author/committer identities and UTC times in every commit reachable from HEAD.")
 options = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 anonymous_name = "PortAtlas contributors"
 anonymous_email = "contributors" + "@" + "portatlas.invalid"
+# Commit identities that may appear in history. GitHub no-reply addresses link commits to a
+# public account without exposing a personal email; nothing else is accepted.
+approved_identities = [
+    f"{anonymous_name} <{anonymous_email}>",
+    "shirizhaki <171726803+shirizhaki" + "@" + "users.noreply.github.com>",
+    "Codex <267193182+codex" + "@" + "users.noreply.github.com>",
+    "Claude <noreply" + "@" + "anthropic.com>",
+]
+# Addresses allowed in commit text, such as co-author trailers.
+approved_emails = {anonymous_email, "171726803+shirizhaki" + "@" + "users.noreply.github.com",
+                   "267193182+codex" + "@" + "users.noreply.github.com", "noreply" + "@" + "anthropic.com"}
 email_pattern = re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 patterns = [
     re.compile(rb"/(?:Users|home)/[^/\s]+"),
@@ -54,16 +65,18 @@ with tempfile.TemporaryDirectory(prefix="portatlas-source-") as folder:
     if options.check_git_history:
         # Read raw commit headers rather than mailmap-rewritten display identities.
         commits = subprocess.check_output(["git", "-C", str(root), "rev-list", "HEAD"], text=True).splitlines()
-        expected_identity = f"{anonymous_name} <{anonymous_email}> ".encode()
         for commit in commits:
             raw = subprocess.check_output(["git", "-C", str(root), "cat-file", "commit", commit])
             headers = raw.split(b"\n\n", 1)[0].splitlines()
             for field in (b"author ", b"committer "):
                 values = [line[len(field):] for line in headers if line.startswith(field)]
-                if len(values) != 1 or not values[0].startswith(expected_identity):
-                    issues.append(commit[:12] + ": nonanonymous commit " + field.decode().strip())
+                if len(values) != 1 or not any(values[0].startswith(f"{identity} ".encode()) for identity in approved_identities):
+                    issues.append(commit[:12] + ": unapproved commit " + field.decode().strip())
+                # A local time zone offset hints at where the author is; history is kept in UTC.
+                elif not values[0].endswith(b" +0000"):
+                    issues.append(commit[:12] + ": non-UTC commit " + field.decode().strip() + " time")
             if any(pattern.search(raw) for pattern in patterns) or any(
-                    match.group() != anonymous_email.encode() for match in email_pattern.finditer(raw)):
+                    match.group().decode() not in approved_emails for match in email_pattern.finditer(raw)):
                 issues.append(commit[:12] + ": commit text contains an email, personal path, or credential marker")
     if issues:
         raise SystemExit("Source package blocked; review these files:\n" + "\n".join(issues))

@@ -200,6 +200,9 @@ final class AtlasStore: ObservableObject {
         catch { settingsError = "Saved port settings could not be read. Reset them to enable saving."; settingsNeedReset = true }
         do { componentPreferences = try componentStore.load() }
         catch { componentLayoutError = "Saved component layout could not be read."; componentLayoutNeedsReset = true }
+        #if DEBUG
+        if DemoTopology.isEnabled { configuration = DemoTopology.configuration; componentPreferences = ComponentPlacementPreferences() }
+        #endif
         // Property observers do not run during init.
         rebuildPresentation(); rebuildTopology()
         monitor = USBMonitor { [weak self] in self?.refresh() }
@@ -255,7 +258,18 @@ final class AtlasStore: ObservableObject {
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
         for observer in volumeObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
+    /// Demo mode (debug builds) shows invented hardware and never writes saved settings.
+    private var persistsSettings: Bool {
+        #if DEBUG
+        return !DemoTopology.isEnabled
+        #else
+        return true
+        #endif
+    }
     func refresh() {
+        #if DEBUG
+        if DemoTopology.isEnabled { displays = DemoTopology.displays; liveSnapshot = DemoTopology.snapshot; return }
+        #endif
         guard !isRefreshing else { refreshAgain = true; return }
         isRefreshing = true
         Task {
@@ -306,7 +320,7 @@ final class AtlasStore: ObservableObject {
     }
     func saveSettings() {
         pendingSave?.cancel(); pendingSave = nil
-        guard !settingsNeedReset else { return }
+        guard !settingsNeedReset, persistsSettings else { return }
         do { try settingsStore.save(configuration); settingsError = nil }
         catch { settingsError = "Port settings could not be saved: \(error.localizedDescription)" }
     }
@@ -368,12 +382,13 @@ final class AtlasStore: ObservableObject {
         snapshot.connectionParent(of: node.id)?.kind == .hub && componentPreferences.key(for: node, in: snapshot) != nil
     }
     func setPlacement(_ placement: ComponentPlacement, for node: HardwareNode) {
-        guard canPlaceComponent(node), !componentLayoutNeedsReset else { return }
+        guard canPlaceComponent(node), !componentLayoutNeedsReset, persistsSettings else { return }
         var next = componentPreferences; next.set(placement, for: node, in: snapshot)
         do { try componentStore.save(next); componentPreferences = next; componentLayoutError = nil }
         catch { componentLayoutError = "Component layout could not be saved." }
     }
     func resetComponentLayout() {
+        guard persistsSettings else { return }
         do {
             let next = ComponentPlacementPreferences(); try componentStore.save(next)
             componentPreferences = next; componentLayoutError = nil; componentLayoutNeedsReset = false
@@ -434,6 +449,7 @@ final class AtlasStore: ObservableObject {
         configuration.assign(node, model: snapshot.modelIdentifier, to: id); saveSettings()
     }
     func saveMatchedPort(connectorID: String, side: PortSide, name: String, replacing portID: UUID?) -> Bool {
+        guard persistsSettings else { return false }
         guard !settingsNeedReset, let connector = liveSnapshot.connectors.first(where: { $0.id == connectorID }) else { return false }
         var next = configuration
         guard next.match(connector, snapshot: liveSnapshot, side: side, name: name, replacing: portID) != nil else { return false }

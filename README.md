@@ -51,7 +51,7 @@ Use a component's inspector or context menu to choose **Automatic**, **Dock comp
 - Built-in SD readers and built-in Ethernet ports are not yet separate physical sockets in the map. Connected Ethernet accessories can expose link information.
 - Initial hands-on coverage is one Apple Silicon MacBook Pro with USB storage, a Thunderbolt dock, displays, and charging. Automated fixtures cover additional topologies, but they cannot establish support across all Macs. See the [hardware validation checklist](Docs/HardwareValidation.md).
 
-The development app is unsandboxed. Discovery uses public IOKit entry points and optional driver properties, including an unprivileged read-only AppleSMC client. It never resets or writes devices. App Store sandbox compatibility and a notarized distribution build have not been established.
+The direct-download app is unsandboxed. Discovery uses public IOKit entry points and optional driver properties, including an unprivileged read-only AppleSMC client. It never resets or writes devices. In a sandboxed test, every discovery path worked except the AppleSMC client; power readings then fall back to the battery controller's slower telemetry.
 
 ## Build locally
 
@@ -74,6 +74,14 @@ open build/PortAtlas.app
 ```
 
 This packages both licenses, strips debug symbols, and signs ad hoc. It does not publish, notarize, or upload anything. The optional GitHub workflow builds/tests the package and Xcode target using a macOS 26 runner; it has no release or publishing step.
+
+To build a signed, notarized disk image for download, install a Developer ID Application certificate, save notarization credentials once with `xcrun notarytool store-credentials PortAtlas`, then run:
+
+```sh
+./Scripts/release.sh
+```
+
+It signs with the hardened runtime, notarizes and staples `build/PortAtlas-<version>.dmg`, and writes its SHA-256 checksum. It does not upload anything.
 
 ## Local settings and a fresh start
 
